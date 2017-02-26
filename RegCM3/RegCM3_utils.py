@@ -35,17 +35,24 @@ class ncdatset():
             sys.exit(12)
 
         self.lat = self.getlat(self.nc)
+        self.latdeg = self.getlatdeg(self.nc)
+        self.londeg = self.getlondeg(self.nc)
+        #print('Self.lat',self.lat)
         if self.lat == None:
             self.logger.error("No lat information found!")
         self.lon = self.getlon(self.nc)
+        #print('Self.lon', self.lat)
         if self.lon == None:
             self.logger.error("No lon information found!")
+        if self.latdeg == None:
+            self.logger.error("No latdeg information found!")
+        if self.londeg == None:
+            self.logger.error("No londeg information found!")
 
         #self.heigth = self.getheigth(self.nc)
         self.dimensions = 3 #  if self.heigth == None else 4
-        self.time =   self.gettime(self.nc)
-        print(self.time.shape[0])
-        self.timesteps = self.time.shape[0]
+        self.time = self.gettime(self.nc)
+        #self.timesteps = self.time.shape[0]
         self.logger.debug(self.nc)
 
 
@@ -57,31 +64,93 @@ class ncdatset():
         """
         """
 
+        # for name, variable in ncdataset.variables.items():
+        #     #print(ncdataset.variables)
+        #     #print('{} -- {}').format(name,variable)
+        #     for attrname in variable.ncattrs():
+        #         #print(attrname)
+        #         if name == 'y':
+        #             return ncdataset.variables[name]
+
         for a in ncdataset.variables:
-            if  ncdataset.variables[a].description == 'latitude':
+            if ncdataset.variables[a].long_name == 'y-coordinate':
                 return ncdataset.variables[a]
+
+        # for a in ncdataset.variables:
+        #     print(ncdataset.variables)
+        #     if  ncdataset.variables[a] == 'lat':
+        #         return ncdataset.variables[a]
 
         return None
 
-    def getvarbyname(self,name):
+    def getvarbyname(self,varname):
         """
         """
 
+        for name, variable in self.nc.variables.items():
+            #print(ncdataset.variables)
+            #print('{} -- {}').format(name,variable)
+            for attrname in variable.ncattrs():
+                #print(attrname)
+                if name == varname:
+                    return self.nc.variables[name]
 
-        for a in self.nc.variables:
-            if  self.nc.variables[a].description  == name:
-                return self.nc.variables[a]
+        # for a in self.nc.variables.keys():
+        #         if a == name:
+        #             return self.nc.variables[a]
+        # #
+        # for a in self.nc.variables:
+        #     if  self.nc.variables[a].NETCDF_VARNAME  == name:
+        #         return self.nc.variables[a]
 
         return None
 
     def gettime(self,ncdataset):
         """
         """
+        # print(ncdataset.variables.ncattrs())
+        #print(ncdataset.dimensions.keys())
+        print(ncdataset.variables.keys())
 
-        for a in ncdataset.variables:
-            if  ncdataset.variables[a].description == 'days since 1900-01-01':
-                #print(ncdataset.variables[a])
-                return ncdataset.variables[a]
+        lat = ncdataset.get_variables_by_attributes(standard_name='lat')
+        #print('asdfsadfsadfsda', lat)
+        # print(times.dtype)
+        # return times
+
+        #
+        # for a in ncdataset.variables.keys():
+        #         if a == 'time':
+        #             return ncdataset.variables[a]
+
+        # for name, variable in ncdataset.variables.items():
+        #     for attrname in variable.ncattrs():
+        #         print("{} -- {}".format(attrname, getattr(variable, attrname)))
+        #         if attrname == 'days since 1900-01-01':
+        #             print(ncdataset.variable)
+        #             return ncdataset.variable
+
+        # cnt = 0
+        # for a in ncdataset.variables:
+        #     # print(ncdataset.variables)
+        #     #print(a)
+        #     for attr in ncdataset.get_variables_by_attributes().ncattrs():
+        #         print attr, '=', getattr(attr)
+        #         # return ncdataset.variables[a]
+
+
+        for name, variable in ncdataset.variables.items():
+            #print(ncdataset.variables)
+            #print('{} -- {}').format(name,variable)
+            for attrname in variable.ncattrs():
+                #print(attrname)
+                if name == 'time':
+                    return ncdataset.variables[name]
+
+        # for a in ncdataset.variables:
+        #     #print(ncdataset.variables)
+        #     print(a)
+        #     if  ncdataset.variables[a].axis == 'gregorian':
+        #         return ncdataset.variables[a]
 
         return None
 
@@ -90,9 +159,47 @@ class ncdatset():
         """
         """
 
+        # for name, variable in ncdataset.variables.items():
+        #     #print(ncdataset.variables)
+        #     #print('sdfsdfsdf', name)
+        #     #print('{} -- {}').format(name,variable)
+        #     for attrname in variable.ncattrs():
+        #         #print(attrname)
+        #         if getattr(variable, attrname) == 'x-coordinate':
+        #             #print('{} -- {}').format(name,variable)
+        #         # if attrname == 'lon':
+        #             return ncdataset.variables[name]
+
         for a in ncdataset.variables:
-            if  ncdataset.variables[a].description == 'longitude':
+            if  ncdataset.variables[a].long_name == 'x-coordinate':
                 return ncdataset.variables[a]
+
+        return None
+
+    def getlondeg(self, ncdataset):
+
+        for name, variable in ncdataset.variables.items():
+            #print(ncdataset.variables)
+            # print('{} -- {}').format(name,variable)
+            for attrname in variable.ncattrs():
+                #print(attrname)
+                if name == 'lon':
+                    return ncdataset.variables[name]
+
+    def getlatdeg(self, ncdataset):
+
+        for name, variable in ncdataset.variables.items():
+            #print(ncdataset.variables)
+            #print('{} -- {}').format(name,variable)
+            for attrname in variable.ncattrs():
+                #print(attrname)
+                if name == 'lat':
+                    return ncdataset.variables[name]
+
+        # for a in ncdataset.variables:
+        #     print(ncdataset.variables)
+        #     if  ncdataset.variables[a] == 'lat':
+        #         return ncdataset.variables[a]
 
         return None
 
@@ -120,6 +227,8 @@ class getstepdaily():
         """
         """
         self.o_nc_files = []
+        self.latdeg = []
+        self.londeg = []
         self.list = nclist
         self.varname = varname
         self.BB = BB
@@ -182,7 +291,10 @@ class getstepdaily():
             time = self.dset.time
             tar = time[:]
             timeObj = netCDF4.num2date(tar, units=time.units, calendar=time.calendar)
-            #print timeObj
+
+            #print('Time Obj',timeObj)
+
+
             spos = nonzero(timeObj == alldates[0])[0]
             if len(spos) != 1:
                 spos = 0
@@ -200,15 +312,57 @@ class getstepdaily():
 
             data = self.dset.getvarbyname(self.varname)
 
+            #print('Data afasdfsdafs',data)
+
             if data == None:
                 self.logger.error("dataset with standard_name " + self.varname + " not found" )
 
+            #Have to slice out latitidues and longitudes from 2-day array of grid
+            # lat = self.dset.lat[:,0]
+            # lon = self.dset.lon[0,:]
+
             lat = self.dset.lat[:]
             lon = self.dset.lon[:]
+            latdeg = self.dset.latdeg[:,0]
+            londeg = self.dset.londeg[0,:]
+            # print('Lats', latdeg)
+            # print('Long', londeg)
 
+            latmin = 31.125
+            latmax = 37.125
+            lonmin = -109.375
+            lonmax = -102.75
+
+
+            # print('Lats',lat)
+            # print('Long',lon)
+            # print('Lats',lat.shape)
+            # print('Long',lon.shape)
+
+            # a = logical_and(lat >= self.BB['lat'][0], lat <= self.BB['lat'][1]).nonzero()
+            # print('mncbocvbpovc', a)
+            # print('mncbocvbpovc', a.shape)
+            # print('mncbocvbpovc', b)
+            # print('mncbocvbpovc', b.shape)
+
+            # print(self.BB['lat'][0])
+            # print(self.BB['lat'][1])
+            # print(self.BB['lon'][0])
+            # print(self.BB['lon'][1])
             (self.latidx,) = logical_and(lat >= self.BB['lat'][0], lat <= self.BB['lat'][1]).nonzero()
             (self.lonidx,) = logical_and(lon >= self.BB['lon'][0], lon <= self.BB['lon'][1]).nonzero()
 
+            (self.latdegidx,) = logical_and(latdeg >= latmin, latdeg <= latmax).nonzero()
+            (self.londegidx,) = logical_and(londeg >= lonmin, londeg <= lonmax).nonzero()
+
+            # print('lat bb', self.latdegidx)
+            # print('lon bb', self.londegidx)
+
+
+            #print('dasfasdf s s', data)
+            #print('lat clipped', self.latidx.shape)
+            #print('lon clipped', self.lonidx.shape)
+            #print('Dimensions sdfasdfsdvcb', self.dset.dimensions)
 
             if self.dset.dimensions ==3:
                 window = data[spos:epos,self.latidx.min():self.latidx.max()+1,self.lonidx.min():self.lonidx.max()+1]
@@ -218,6 +372,11 @@ class getstepdaily():
 
             self.lat = lat[self.latidx]
             self.lon = lon[self.lonidx]
+
+            self.latdeg = lat[self.latdegidx]
+            self.londeg = lon[self.londegidx]
+
+            # print(window)
 
             if len(ret) == 0:
                 ret = window.copy()
@@ -267,11 +426,6 @@ class getstepdaily():
 
             lat = self.dset.lat[:]
             lon = self.dset.lon[:]
-
-            print('Lats',lat)
-            print('Long',lon)
-            print('Lats',lat.shape)
-            print('Long',lon.shape)
 
             (self.latidx,) = logical_and(lat >= self.BB['lat'][0], lat <= self.BB['lat'][1]).nonzero()
             (self.lonidx,) = logical_and(lon >= self.BB['lon'][0], lon <= self.BB['lon'][1]).nonzero()
@@ -412,8 +566,8 @@ class getstep():
             if self.dset.dimensions ==4:
                 window = data[spos:epos,0,self.latidx.min():self.latidx.max()+1,self.lonidx.min():self.lonidx.max()+1]
 
-            print('Time sliced data')
-            print(window.shape)
+           # print('Time sliced data')
+            #print(window.shape)
             self.lat = lat[self.latidx]
             self.lon = lon[self.lonidx]
 
@@ -482,6 +636,7 @@ def readMap(fileName, fileFormat,logger):
     mapFormat = gdal.GetDriverByName(fileFormat)
     mapFormat.Register()
     ds = gdal.Open(fileName)
+    prj = ds.GetProjection()
     if ds is None:
         logger.error('Could not open ' + fileName + '. Something went wrong!! Shutting down')
         sys.exit(1)
@@ -501,7 +656,7 @@ def readMap(fileName, fileFormat,logger):
     FillVal = RasterBand.GetNoDataValue()
     RasterBand = None
     del ds
-    return resX, resY, cols, rows, x, y, data, FillVal
+    return resX, resY, cols, rows, x, y, data, prj, FillVal
 
 
 def getmapnamemonth(yearday,prefix):
@@ -543,7 +698,7 @@ def getmapname(number,prefix,day):
 
     return mapname
 
-def writeMap(fileName, fileFormat, x, y, data, FillVal):
+def writeMap(fileName, fileFormat, x, y, data, prj, FillVal):
     """
     Write geographical data into file. Also replave NaN bu FillVall
 
@@ -574,6 +729,7 @@ def writeMap(fileName, fileFormat, x, y, data, FillVal):
     yul = y[0]+(y[0]-y[1])/2
 
     TempDataset.SetGeoTransform( [ xul, x[1]-x[0], 0, yul, 0, y[1]-y[0] ] )
+    TempDataset.SetProjection(prj)
     # get rasterband entry
     TempBand = TempDataset.GetRasterBand(1)
     # fill rasterband with array

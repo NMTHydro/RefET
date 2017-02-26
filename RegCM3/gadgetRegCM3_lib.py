@@ -3,17 +3,17 @@ import getopt, sys, os
 import datetime
 import numpy as np
 import numexpr as ne
-from e2o_utils import *
+from RegCM3_utils import *
 import gc
 import time
 
 # from memory_profiler import profile
 
-nthreads = 4
+nthreads = 2
 ne.set_num_threads(nthreads)
 
 
-def save_as_mapsstack_per_day(lat, lon, data, ncnt, date, directory, prefix="GADGET", oformat="Gtiff", FillVal=1E31,
+def save_as_mapsstack_per_day(lat, lon, data, ncnt, date, directory, prj, prefix="GADGET", oformat="Gtiff",  FillVal=1E31,
                               gzip=True):
     import platform
 
@@ -22,7 +22,7 @@ def save_as_mapsstack_per_day(lat, lon, data, ncnt, date, directory, prefix="GAD
     mapname = getmapname(ncnt, prefix, date)
     # print "saving map: " + os.path.join(directory,mapname)
     # writeMap(os.path.join(directory,mapname),oformat,lon,lat[::-1],flipud(data[:,:]),-999.0)
-    writeMap(os.path.join(directory, mapname), oformat, lon, lat, data[:, :], FillVal)
+    writeMap(os.path.join(directory, mapname), oformat, lon, lat, data[:, :], prj, FillVal)
     if gzip:
         if 'Linux' in platform.system():
             os.system('gzip ' + os.path.join(directory, mapname))
@@ -33,14 +33,17 @@ def Rnet_PM(elev, Ra, ea_mean, relevantDataFields):
     alpha = 0.23  # reference surface albedo
     sigma = 4.903e-9  # stephan boltzmann [W m-2 K-4 day]
 
-    Tmax = relevantDataFields[0]
-    Tmin = relevantDataFields[1]
+    Tmean = relevantDataFields[0] + 273.16 #Convert C to K for Rnl formula
+    # relhumid = relevantDataFields[2]
+    #Tmax = relevantDataFields[0]
+    #Tmin = relevantDataFields[1]
     Rsin = relevantDataFields[3]
+
 
     # clear sky solar radiation MJ d-1
     Rso = np.maximum(0.1, ne.evaluate("(0.75+(2*0.00005*elev)) * Ra"))  # add elevation correction term elev with 5*10-5
-    Rlnet_Watt = - sigma * (((Tmin ** 4 + Tmax ** 4) / 2) * (0.34 - 0.14 * np.sqrt(np.maximum(0, (ea_mean / 1000)))) \
-                            * (1.35 * np.minimum(1, ((Rsin * 0.0864) / Rso)) - 0.35))  # ea_mean in Pa / 1000 to get kPa
+    Rlnet_Watt = - sigma * ((Tmean ** 4) * (0.34 - 0.14 * np.sqrt(np.maximum(0, (ea_mean)))) \
+                            * (1.35 * np.minimum(1, ((Rsin * 0.0864) / Rso)) - 0.35))
     Rlnet_Watt /= 0.0864  # MJ d-1 to Watts
 
     ##    a = np.zeros(3)
@@ -54,7 +57,7 @@ def Rnet_PM(elev, Ra, ea_mean, relevantDataFields):
 
 
 # @profile
-def PenmanMonteith(currentdate, relevantDataFields, Ra, es_mean, ea_mean, Rnet, mismask):
+def PenmanMonteith(currentdate, relevantDataFields, Ra, es_mean, ea_mean, Rnet, Pres):
     """
 
     :param lat:
@@ -68,16 +71,25 @@ def PenmanMonteith(currentdate, relevantDataFields, Ra, es_mean, ea_mean, Rnet, 
                          'SurfaceIncidentShortwaveRadiation','SurfaceWindSpeed','Pressure','CorrectedSpecificHumidity']
     """
 
-    Tmax = relevantDataFields[0]
-    Tmin = relevantDataFields[1]
+    Tmean = relevantDataFields[0]
+    #Tmax = relevantDataFields[0]
+    #Tmin = relevantDataFields[1]
     # Q       =  relevantDataFields[2]
     # Rsin    =  relevantDataFields[3]
-    Wsp = relevantDataFields[4]
-    Pres = relevantDataFields[5]
+    Ua = relevantDataFields[4]
+    Uv = relevantDataFields[5]
+    #Pres = relevantDataFields[5]
     # Q       =  relevantDataFields[6]
 
-    Tmean = (relevantDataFields[0] + relevantDataFields[1]) / 2
-    Tmean[mismask] = 0.0001
+    #Calculate resultant wind speed by taking sqrt of north and west vectors
+    Wsp = np.sqrt(Ua**2 + Uv**2)
+
+    # Convert kPa to Pa for consistent units
+    ea_mean *= 1000
+    es_mean *= 1000
+
+
+    #Tmean = (relevantDataFields[0] + relevantDataFields[1]) / 2
 
     """
     Computes Penman-Monteith reference evaporation
@@ -165,13 +177,13 @@ def PenmanMonteith(currentdate, relevantDataFields, Ra, es_mean, ea_mean, Rnet, 
     # aerodynamic resistance
     z = 10  # height of wind speed variable (10 meters above surface)
     Wsp_2 = Wsp * 4.87 / (np.log(67.8 * z - 5.42))  # Measured over 0.13 m full grass = [m s-1]
-    # ra = 208./Wsp_2                                # 0.13 m tall crop height = [s m-1]
+    # ra = 208./Wsp_2                                # 0.13 m short crop height = [s m-1]
 
     # Wsp_2 = Wsp*3.44/(np.log(16.3*z-5.42))         # Measured over 0.50 m tall crop height = [m s-1]
     # ra = 110./Wsp_2                                # 0.50 m tall crop height = [s m-1]
 
     PETmm = np.maximum((delta * np.maximum(0, (Rnet)) + (Pres / (Tmean * R)) * cp * np.maximum(es_mean - (ea_mean),
-                                                                                               0.) / (110. / Wsp_2)), 1)
+                                                                                               0.) / (110. / Wsp_2)), 1)  #
     PETmm /= np.maximum(
         ne.evaluate("(delta + (cp*Pres/(eps*(2.501-(0.002361*(Tmean-273.15)))*1e6))*(1+(rs/(110./Wsp_2))))"), 1)
     # PET     = np.maximum(PETtop/PETbase, 0)
@@ -185,15 +197,26 @@ def PenmanMonteith(currentdate, relevantDataFields, Ra, es_mean, ea_mean, Rnet, 
     else:
         pass
 
-    return PETmm
+    return PETmm, Wsp
 
 
 def downscale(ncnt, currentdate, filenames, variables, standard_names, serverroot, wrrsetroot, relevantVars,
               elevationCorrection, BB, highResLon, highResLat, resLowResDEM, highResDEM,
               lowResLon, lowResLat, lowResDEM, logger, radcordir, odir, oprefix, lonmax, lonmin, latmax, latmin,
-              downscaling, resamplingtype, oformat, saveAllData, FillVal):
+              downscaling, resamplingtype, oformat, saveAllData, prj, FillVal):
     nrcalls = 0
     start_steptime = time.time()
+
+    #Need to read in actual lat / long of high-resolution grid
+    highresDEMwgs84 = 'DEM/NMbufferMatchLCCasWGS84.tif'
+    resX, resY, cols, rows, highResLondeg, highResLatdeg, highResDEM, prj, Fills = readMap(highresDEMwgs84, 'GTiff', logger)
+
+    # lons = highResLon
+    # lats = highResLat
+
+    # elevationCorrection = ne.evaluate("highResDEM - resLowResDEM")
+    # print('Elevation Correction', elevationCorrection.shape)
+    # print('Elevation Correction', elevationCorrection)
 
     # Get all daily datafields needed and aad to list
     relevantDataFields = []
@@ -223,50 +246,77 @@ def downscale(ncnt, currentdate, filenames, variables, standard_names, serverroo
                 ncstepobj = getstepdaily(tlist, BB, standard_name, logger)
 
                 logger.info("Get data...: " + str(timelist))
+
                 mstack = ncstepobj.getdates(timelist)
                 mean_as_map = flipud(mstack.mean(axis=0))  #Time dimension is 3(2) instead of 1st in new data
 
                 logger.info("Get data body...")
                 logger.info("Downscaling..." + variables[i])
-                print('Data dimensions{}'.format(mean_as_map.shape))
-                print('Lon shape{}'.format(ncstepobj.lon.shape))
-                print('Lat shape{}'.format(ncstepobj.lat.shape))
+                #print('Data dimensions{}'.format(mean_as_map.shape))
+                #print('Lon shape{}'.format(ncstepobj.lon.shape))
+                #print('Lat shape{}'.format(ncstepobj.lat.shape))
 
-                
                 # save_as_mapsstack_per_day(ncstepobj.lat,ncstepobj.lon,mean_as_map,int(ncnt),'temp',prefixes[i],oformat='GTiff')
                 # mean_as_map = resample(FNhighResDEM,prefixes[i],int(ncnt),logger)
                 mean_as_map = resample_grid(mean_as_map, ncstepobj.lon, ncstepobj.lat, highResLon, highResLat,
-                                            method=resamplingtype, FillVal=FillVal)
+                                            method=resamplingtype, FillVal=-999)
                 mismask = mean_as_map == FillVal
-                # mean_as_map = flipud(mean_as_map)
+                mean_as_map = flipud(mean_as_map)
+                # FillVal = 0
                 mean_as_map[mismask] = FillVal
-                if variables[i] == 'MaxTemperature':
-                    mean_as_map, Tmax = correctTemp(mean_as_map, elevationCorrection, FillVal)
-                if variables[i] == 'MinTemperature':
-                    mean_as_map, Tmin = correctTemp(mean_as_map, elevationCorrection, FillVal)
-                if variables[i] == 'SurfaceIncidentShortwaveRadiation':
+                if variables[i] == 'TA':
+                    # save_as_mapsstack_per_day(lats, lons, mean_as_map, int(ncnt), currentdate, odir, prj,
+                    #                           prefix='Tmean_early',
+                    #                           oformat=oformat, FillVal=FillVal)
+                    mean_as_map, tempavg = correctTemp(mean_as_map, elevationCorrection, FillVal)
+                    # print('Corrected average temperature', tempavg)
+                    # print('Data dimensions{}'.format(mean_as_map.shape))
+                if variables[i] == 'TAMINA':
+                    mean_as_map, tempmin = correctTemp(mean_as_map, elevationCorrection, FillVal)
+                # if variables[i] == 'RHA':
+                    # relhum = mean_as_map
+                    # print('average RH mean', relevantDataFields[2])
+                    # print('average RH', relhum)
+                if variables[i] == 'SWI':
                     mean_as_map, Ra = correctRsin(mean_as_map, currentdate, radcordir, LATITUDE, logger, FillVal)
                 mean_as_map[mismask] = FillVal
 
                 relevantDataFields.append(mean_as_map)
 
-                # only needed once to get vector of latitudes, needed to calculate Ra called by correctRsin function and PM (not needed, left over from before)
+                # # only needed once to get vector of latitudes
                 if nrcalls == 0:
                     nrcalls = nrcalls + 1
-                    latitude = ncstepobj.lat[:]
+                    latitude = ncstepobj.latdeg[:]
+                    # print('sfasdfs', latitude)
+                    latmin = 31.125
+                    latmax = 37.125
+                    lonmin = -109.375
+                    lonmax = -102.75
                     # assuming a resolution of 0.041665999999999315 degrees (4km lat)
-                    factor = 1 / 0.041665999999999315  # ~24 instead of 8 for NLDAS (1/8 degree)
-                    LATITUDE = np.ones(((factor * (latmax - latmin)), (factor * (lonmax - lonmin))))
-                    for i in range(0, int((factor * (lonmax - lonmin)))):
+                    # RegCM3 Lambert Conformal Conic projection pixel size is 15 km
+                    latfactor = 1 / 0.136363636
+                    lonfactor = 1 / 0.154069767
+                    #latfactor = 1/15 #X coordinate factor for LCC units = 15 km
+                    #lonfactor = 1/15 #Y coordinate factor for LCC units = 15 km
+
+                    LATITUDE = np.ones(((latfactor * (latmax - latmin)), (lonfactor * (lonmax - lonmin))))
+
+                    numlats =int((latfactor * (lonmax - lonmin)))
+                    numlongs =int((lonfactor * (latmax - latmin)))
+                    # print('number of lats', numlats)
+                    # print('number of longs', numlongs)
+                    #print('latitudes', latitude.shape)
+
+                    for i in range(0, int((lonfactor * (lonmax - lonmin)))):
                         LATITUDE[:, i] = LATITUDE[:, i] * latitude
                     if downscaling == 'True' or resampling == "True":
                         # save_as_mapsstack_per_day(ncstepobj.lat,ncstepobj.lon,LATITUDE,int(ncnt),'temp','lat',oformat=oformat)
                         # LATITUDE = resample(FNhighResDEM,'lat',int(ncnt),logger)
                         LATITUDE = zeros_like(highResDEM)
                         for i in range(0, LATITUDE.shape[1]):
-                            LATITUDE[:, i] = highResLat
+                            LATITUDE[:, i] = highResLatdeg
 
-                    # assign longitudes and lattitudes grids
+                        # assign longitudes and lattitudes grids
                     if downscaling == 'True' or resampling == "True":
                         lons = highResLon
                         lats = highResLat
@@ -275,64 +325,81 @@ def downscale(ncnt, currentdate, filenames, variables, standard_names, serverroo
                         lats = ncstepobj.lat
 
         # Correct Pressure separately since no data in METDATA netCDF file
-        mean_as_map = correctPres(relevantDataFields, highResDEM, resLowResDEM, FillVal=FillVal)
+        # mean_as_map = correctPres(relevantDataFields, highResDEM, resLowResDEM, FillVal=FillVal)
+        # # mismask = mean_as_map == FillVal
+        # # mean_as_map[mismask] = FillVal
+        # relevantDataFields.append(mean_as_map)
+
+        Pres = correctPres(relevantDataFields, highResDEM, resLowResDEM, FillVal=FillVal)
         # mismask = mean_as_map == FillVal
         # mean_as_map[mismask] = FillVal
-        relevantDataFields.append(mean_as_map)
+        #relevantDataFields.append(mean_as_map)
 
         # Correct RH by keeping constant at lapsed temperature and adjust pressure with elevation
-        es_mean, ea_mean = correctQ_RH(relevantDataFields, Tmax, Tmin, highResDEM, resLowResDEM, mismask,
-                                       FillVal=FillVal)
+        # es_mean, ea_mean = correctQ_RH(tempavg, relhum, highResDEM, resLowResDEM,
+        #                                FillVal=FillVal)
         # mean_as_map[mismask] = FillVal
         # relevantDataFields.append(mean_as_map)
-        ea_org = ea_mean
-        ea_org.clip(-999, 10000, out=ea_org)
+        # ea_org = ea_mean
+        # ea_org.clip(0, 10000, out=ea_org)
 
         # Apply aridity correction
         logger.info("Applying aridity correction...")
-        ea_mean, Tdew_diff = arid_cor(relevantDataFields[1], ea_mean, logger)
-        mean_as_map[mismask] = FillVal
-        ea_arid = ea_mean
-        ea_arid.clip(-999, 10000, out=ea_arid)
+        ea_mean, es_mean = arid_cor(relevantDataFields, logger)
+        ea_mean[isinf(ea_mean)] = FillVal
+        es_mean[isinf(es_mean)] = FillVal
+        rh_cor = ea_mean / es_mean
+        # ea_arid = ea_mean
+        # ea_arid.clip(0, 10000, out=ea_arid)
 
         # Calculate Net radiation input for PM energy term
         Rnet, Rlnet_Watt = Rnet_PM(highResDEM, Ra, ea_mean, relevantDataFields)
-        Rlnet_Watt.clip(-999, 500, out=Rlnet_Watt)
-        Rnet.clip(-999, 500, out=Rnet)
+        # Rlnet_Watt.clip(0, 500, out=Rlnet_Watt)
+        # Rnet.clip(0, 500, out=Rnet)
 
-        #
-        PETmm = PenmanMonteith(currentdate, relevantDataFields, Ra, es_mean, ea_mean, Rnet, mismask)
+        # print ('Length of relevantDataFields', len(relevantDataFields))
+        # print '\n'.join(str(p) for p in relevantDataFields)
+        PETmm, Wsp = PenmanMonteith(currentdate, relevantDataFields, Ra, es_mean, ea_mean, Rnet, Pres)
         # FIll out unrealistic values
-        PETmm[mismask] = FillVal
+        # PETmm[mismask] = FillVal
         PETmm[isinf(PETmm)] = FillVal
-        PETmm.clip(-999, 50, out=PETmm)
+        PETmm.clip(0, 50, out=PETmm)
 
         logger.info("Saving PM PET data for: " + str(currentdate))
-        save_as_mapsstack_per_day(lats, lons, PETmm, int(ncnt), currentdate, odir, prefix=oprefix, oformat=oformat,
+        save_as_mapsstack_per_day(lats, lons, PETmm, int(ncnt), currentdate, odir, prj, prefix=oprefix, oformat=oformat,
                                   FillVal=FillVal)
-        save_as_mapsstack_per_day(lats, lons, relevantDataFields[3], int(ncnt), currentdate, odir, prefix='RTOT',
+        save_as_mapsstack_per_day(lats, lons, relevantDataFields[3], int(ncnt), currentdate, odir, prj, prefix='SWI',
                                    oformat=oformat, FillVal=FillVal)
         #save_as_mapsstack_per_day(lats,lons,Rnet,int(ncnt),currentdate,odir,prefix='RNET',oformat=oformat,FillVal=FillVal)
         # save_as_mapsstack_per_day(lats,lons,Rlnet_Watt,int(ncnt),currentdate,odir,prefix='RLIN',oformat=oformat,FillVal=FillVal)
-        # save_as_mapsstack_per_day(lats,lons,Ra,int(ncnt),currentdate,odir,prefix='Ra',oformat=oformat,FillVal=FillVal)
         # save_as_mapsstack_per_day(lats,lons,Tdew_diff,int(ncnt),currentdate,odir,prefix='Tdewcor',oformat=oformat,FillVal=FillVal)
         # save_as_mapsstack_per_day(lats,lons,ea_org,int(ncnt),currentdate,odir,prefix='ea_org',oformat=oformat,FillVal=FillVal)
         # save_as_mapsstack_per_day(lats,lons,ea_arid,int(ncnt),currentdate,odir,prefix='ea_arid',oformat=oformat,FillVal=FillVal)
         # save_as_mapsstack_per_day(lats,lons,relevantDataFields[1],int(ncnt),currentdate,odir,prefix='TMIN',oformat=oformat,FillVal=FillVal)
 
         if saveAllData:
-            save_as_mapsstack_per_day(lats, lons, relevantDataFields[1], int(ncnt), currentdate, odir, prefix='TMIN',
+            save_as_mapsstack_per_day(lats, lons, relevantDataFields[0], int(ncnt), currentdate, odir, prj, prefix='Tmean',
                                       oformat=oformat, FillVal=FillVal)
-            save_as_mapsstack_per_day(lats, lons, relevantDataFields[0], int(ncnt), currentdate, odir, prefix='TMAX',
+            save_as_mapsstack_per_day(lats, lons, relevantDataFields[1], int(ncnt), currentdate, odir, prj, prefix='RH',
                                       oformat=oformat, FillVal=FillVal)
-            save_as_mapsstack_per_day(lats, lons, relevantDataFields[5], int(ncnt), currentdate, odir, prefix='PRESS',
+            save_as_mapsstack_per_day(lats, lons, rh_cor, int(ncnt), currentdate, odir, prj, prefix='RH_cor',
                                       oformat=oformat, FillVal=FillVal)
-            save_as_mapsstack_per_day(lats, lons, relevantDataFields[3], int(ncnt), currentdate, odir, prefix='RSIN',
+            save_as_mapsstack_per_day(lats, lons, Rlnet_Watt, int(ncnt), currentdate, odir, prj, prefix='Rlnet',
                                       oformat=oformat, FillVal=FillVal)
-            save_as_mapsstack_per_day(lats, lons, relevantDataFields[4], int(ncnt), currentdate, odir, prefix='WIN',
+            # save_as_mapsstack_per_day(lats, lons, Pres, int(ncnt), currentdate, odir, prj, prefix='PRESS',
+            #                            oformat=oformat, FillVal=FillVal)
+            # save_as_mapsstack_per_day(lats, lons, Ra, int(ncnt), currentdate, odir, prj, prefix='Ra', oformat=oformat,
+            #                           FillVal=FillVal)
+            # save_as_mapsstack_per_day(lats, lons, Wsp, int(ncnt), currentdate, odir, prj, prefix='Wsp', oformat=oformat,
+            #                           FillVal=FillVal)
+            save_as_mapsstack_per_day(lats, lons, Rnet, int(ncnt), currentdate, odir, prj, prefix='Rnet',
                                       oformat=oformat, FillVal=FillVal)
-            save_as_mapsstack_per_day(lats, lons, relevantDataFields[2], int(ncnt), currentdate, odir, prefix='Q',
-                                      oformat=oformat, FillVal=FillVal)
+            # save_as_mapsstack_per_day(lats, lons, ea_mean, int(ncnt), currentdate, odir, prj, prefix='ea',
+            #                           oformat=oformat, FillVal=FillVal)
+            # save_as_mapsstack_per_day(lats, lons, es_mean, int(ncnt), currentdate, odir, prj, prefix='es',
+            #                           oformat=oformat, FillVal=FillVal)
+            #save_as_mapsstack_per_day(lats, lons, relevantDataFields[2], int(ncnt), currentdate, odir, prefix='Q',
+                                      # oformat=oformat, FillVal=FillVal)
             # save_as_mapsstack_per_day(lats,lons,relevantDataFields[6],int(ncnt),currentdate,odir,prefix='Qcorr',oformat=oformat,FillVal=FillVal)
             # save_as_mapsstack_per_day(lats,lons,RHref,int(ncnt),currentdate,odir,prefix='RHref',oformat=oformat,FillVal=FillVal)
             # save_as_mapsstack_per_day(lats,lons,RHcorr,int(ncnt),currentdate,odir,prefix='RHcorr',oformat=oformat,FillVal=FillVal)
@@ -368,7 +435,7 @@ def correctTemp(Temp, elevationCorrection, FillVal):
 
     inputs:
     Temperature             = daily min or max temperature (degrees Celcius)
-    Elevation correction    = difference between high resolution and low resolution (4 km) DEM  [m]
+    Elevation correction    = difference between high resolution and low resolution (15 km) DEM  [m]
 
     constants:
     lapse_rate = 0.0065 # [ K m-1 ]
@@ -377,20 +444,20 @@ def correctTemp(Temp, elevationCorrection, FillVal):
     # apply elevation correction
     lapse_rate = 0.0065  # [ K m-1 ]
 
-    Temp[Temp < 0.0] = FillVal
-    Temp[Temp == 0.0] = FillVal
-    Temp[isinf(Temp)] = FillVal
+    # Temp[Temp < 0.0] = FillVal
+    # Temp[Temp == 0.0] = FillVal
+    # Temp[isinf(Temp)] = FillVal
 
-    Temp_cor = ne.evaluate("Temp - lapse_rate * elevationCorrection", optimization='aggressive')
+    Temp_cor = ne.evaluate("Temp - lapse_rate * elevationCorrection")
     # Tempag = pcr.numpy2pcr(Scalar, Temp, 0.0)
     # aguila(Tempag)
     # Elag = pcr.numpy2pcr(Scalar, elevationCorrection, 0.0)
     # aguila(Elag)
-    Temp_cor[Temp_cor < 0.0] = FillVal
-    Temp_cor[Temp_cor == 0.0] = FillVal
-    Temp_cor[isinf(Temp_cor)] = FillVal
+    # Temp_cor[Temp_cor < 0.0] = FillVal
+    # Temp_cor[Temp_cor == 0.0] = FillVal
+    # Temp_cor[isinf(Temp_cor)] = FillVal
 
-    return Temp_cor, Temp
+    return Temp_cor, Temp_cor
 
 
 def correctRsin(Rsin, currentdate, radiationCorDir, lat, logger, FillVal):
@@ -412,7 +479,7 @@ def correctRsin(Rsin, currentdate, radiationCorDir, lat, logger, FillVal):
     # Get daily Extraterrestrial radiation
     Ra, sunset = Ra_daily(currentdate, lat)
 
-    Ra /= 0.0864  # Convert from MJ day-1 to W m-2 day
+    Ra /= 0.0864 #Convert from MJ day-1 to W m-2 day
 
     # Calculate clearness index (kt) using Ra, adjust with optical path if Kt >= 0.65
     kt = np.maximum(np.minimum(ne.evaluate("Rsin/Ra"), 1), 0.0001)
@@ -420,8 +487,7 @@ def correctRsin(Rsin, currentdate, radiationCorDir, lat, logger, FillVal):
     # Use Ruiz-Ariaz, 2010b elevation function instead of Opcorr? Or saved Opcorr from hourly algorithm?
     #np.select([kt >= 0.65, kt < 0.65], [Rsin * Opcorr, Rsin])
 
-    # Partition radiation into beam and diffuse components for flat surface following Ruiz-Ariaz, 2010b
-    # (for hourly not daily solar radiation)
+    # Partition radiation into bbeam and diffuse components for flat surface following Ruiz-Ariaz, 2010b
     # kd = np.maximum(0.952 - (1.041 * np.exp(-1 * np.exp(2.300 - 4.702 * kt))), 0.0001)
 
     # Partition daily global radiation into beam and diffuse components for flat surface following Erbs et al., 1982
@@ -441,6 +507,7 @@ def correctRsin(Rsin, currentdate, radiationCorDir, lat, logger, FillVal):
     kd = np.where((sunset >= 1.4208) & (kt >= 0.722),
                   0.175, kd)
 
+
     Rd_rsky = kd * Rsin
     Rb_rsky = (1-kd) * Rsin
 
@@ -448,8 +515,8 @@ def correctRsin(Rsin, currentdate, radiationCorDir, lat, logger, FillVal):
     Rd_clrflat = 'Rdflat_' + day.strftime('%j') + '.tif'
     Rb_clrflat = 'Rbflat_' + day.strftime('%j') + '.tif'
 
-    resX, resY, cols, rows, LinkeLong, LinkeLat, Rd_flat, FillVal = readMap((os.path.join(path, flatdir, Rd_clrflat)), 'Gtiff', logger)
-    resX, resY, cols, rows, LinkeLong, LinkeLat, Rb_flat, FillVal = readMap((os.path.join(path, flatdir, Rb_clrflat)), 'Gtiff', logger)
+    resX, resY, cols, rows, LinkeLong, LinkeLat, Rd_flat, prj, FillVal = readMap((os.path.join(path, flatdir, Rd_clrflat)), 'Gtiff', logger)
+    resX, resY, cols, rows, LinkeLong, LinkeLat, Rb_flat, prj, FillVal = readMap((os.path.join(path, flatdir, Rb_clrflat)), 'Gtiff', logger)
 
     # Rb_flat = flipud(Rb_flat.mean(axis=0))
     # Rd_flat = flipud(Rb_flat.mean(axis=0))
@@ -465,8 +532,8 @@ def correctRsin(Rsin, currentdate, radiationCorDir, lat, logger, FillVal):
     Rd_clrDEM = 'Rd_' + day.strftime('%j') + '.tif'
     Rb_clrDEM = 'Rb_' + day.strftime('%j') + '.tif'
 
-    resX, resY, cols, rows, LinkeLong, LinkeLat, Rd_DEM, FillVal = readMap((os.path.join(path, topoDEM, Rd_clrDEM)), 'Gtiff', logger)
-    resX, resY, cols, rows, LinkeLong, LinkeLat, Rb_DEM, FillVal = readMap((os.path.join(path, topoDEM, Rb_clrDEM)), 'Gtiff', logger)
+    resX, resY, cols, rows, LinkeLong, LinkeLat, Rd_DEM, prj, FillVal = readMap((os.path.join(path, topoDEM, Rd_clrDEM)), 'Gtiff', logger)
+    resX, resY, cols, rows, LinkeLong, LinkeLat, Rb_DEM, prj, FillVal = readMap((os.path.join(path, topoDEM, Rb_clrDEM)), 'Gtiff', logger)
 
     logger.info("Reading clear-sky daily solar radiation:")
 
@@ -496,9 +563,9 @@ def correctPres(relevantDataFields, highResDEM, resLowResDEM, FillVal=1E31):
                     'NearSurfaceSpecificHumidity','SurfaceIncidentShortwaveRadiation','NearSurfaceWindSpeed']
     """
 
-    Tmax = relevantDataFields[0]
-    Tmin = relevantDataFields[1]
-    Tmean = (Tmin + Tmax) / 2
+    #Tmax = relevantDataFields[0]
+    #Tmin = relevantDataFields[1]
+    #Tmean = (Tmin + Tmax) / 2
 
     g = 9.801  # gravitational constant [m s-2]
     R_air = 8.3144621  # specific gas constant for dry air [J mol-1 K-1]
@@ -515,7 +582,7 @@ def correctPres(relevantDataFields, highResDEM, resLowResDEM, FillVal=1E31):
 
     Pres_corr = np.zeros_like(highResDEM)
     # Incorrect without pressure at METDATA elevation
-    # Pres_corr    = ne.evaluate("Pressure *( (Tmean/ ( Tmean + lapse_rate * (highResDEM))) ** (g * Mo / (R_air * lapse_rate)))",optimization='aggressive')
+    # Pres_corr    = ne.evaluate("Pressure *( (Tmean/ ( Tmean + lapse_rate * (highResDEM-resLowResDEM))) ** (g * Mo / (R_air * lapse_rate)))")
     Pres_corr = ne.evaluate("101300 *( (293.0 - lapse_rate * (highResDEM)) / 293.0) ** (5.26)")
 
     Pres_corr[isnan(Pres_corr)] = FillVal
@@ -526,7 +593,7 @@ def correctPres(relevantDataFields, highResDEM, resLowResDEM, FillVal=1E31):
 
 
 # @profile
-def correctQ_RH(relevantDataFields, Tmax, Tmin, highResDEM, resLowResDEM, mismask, FillVal=1E31):
+def correctQ_RH(Tmean, RH, highResDEM, resLowResDEM, FillVal=1E31):
     """
     Constant Relative Humidity with elevation using datum specific humidity and temperature
 
@@ -543,18 +610,20 @@ def correctQ_RH(relevantDataFields, Tmax, Tmin, highResDEM, resLowResDEM, mismas
     g = 9.81  # gravitational constant [m s-2]
     R_air = 8.3144621  # specific gas constant for dry air [J mol-1 K-1]
     Mo = 0.0289644  # molecular weight of gas [g / mol]
-    lapse_rate = 0.006  # lapse rate [K m-1]
+    lapse_rate = 0.0065  # lapse rate [K m-1]
     eps = 0.622  # ratio of water vapour/dry air molecular weights [-]
     FillVal = 1E31
     R = 287.058  # Specific gas constant for dry air [J kg-1 K-1]
     rv = 461  # Specific gas constant for water vapor[J kg-1 K-1]
     eps = 0.622  # ratio of water vapour/dry air molecular weights (R / rv) [-]
 
-    Temp_corr = (relevantDataFields[0] + relevantDataFields[1]) / 2
-    Pres_corr = relevantDataFields[5]
-    Q = relevantDataFields[2]
+    #Temp_corr = (relevantDataFields[0] + relevantDataFields[1]) / 2
+    #Pres_corr = relevantDataFields[5]
+    #Q = relevantDataFields[2]
     # p_mb = relevantDataFields[5] / 1000
-    Tmean = (Tmax + Tmin) / 2  # Original Tmean, Tmax without elevation lapse adjustment
+    #Tmean = (Tmax + Tmin) / 2  # Original Tmean, Tmax without elevation lapse adjustment
+    # Tmean = relevantDataFields[0]
+    # RH = relevantDataFields[2]
 
     ##    tag = pcr.numpy2pcr(Scalar, Temp_corr, FillVal)
     ##    aguila(tag)
@@ -575,8 +644,8 @@ def correctQ_RH(relevantDataFields, Tmax, Tmin, highResDEM, resLowResDEM, mismas
     # saturation vapour pressure [Pa]
     # es = lambda T:610.8*np.exp((17.27*(Tmean-273.15))/((Tmean-273.15)+237.3))
     es_ref = ne.evaluate("610.8*exp((17.27*(Tmean-273.15))/((Tmean-273.15)+237.3))")
-    es_elev = ne.evaluate("610.8*exp((17.27*(Temp_corr-273.15))/((Temp_corr-273.15)+237.3))")
-    es_elev[isinf(es_elev)] = FillVal
+    #es_elev = ne.evaluate("610.8*exp((17.27*(Temp_corr-273.15))/((Temp_corr-273.15)+237.3))")
+    #es_elev[isinf(es_elev)] = FillVal
     ##    tag = pcr.numpy2pcr(Scalar, es_ref, FillVal)
     ##    aguila(tag)
 
@@ -585,9 +654,14 @@ def correctQ_RH(relevantDataFields, Tmax, Tmin, highResDEM, resLowResDEM, mismas
 
     # actual vapour pressure [Pa]
     # ea = lambda Pres, Q, eps: -(Q*Pres)/((eps-1)*Q-eps)
-    ea_ref = ne.evaluate("-(Q*Pres_corr)/((eps-1)*Q-eps)")
-    ea_ref[mismask] = 0.0001
+    #ea_ref = ne.evaluate("-(Q*Pres_corr)/((eps-1)*Q-eps)")
+    ea_ref = (es_ref*RH) # /100 RH is out of 1 not 100 so don't need to divide by 100
+    # ea_ref[mismask] = 0.0001
     # ea_elev = ea(Pres_corr, Q, eps)
+    print('Tmean ljklkjgsd', Tmean)
+    print('RH safasdf', RH)
+    print('es_ref safasdf', es_ref)
+    print('ea_ref fjghgfh', es_ref)
 
 
     # rh_ref = ne.evaluate("ea_ref / es_ref")
@@ -596,11 +670,11 @@ def correctQ_RH(relevantDataFields, Tmax, Tmin, highResDEM, resLowResDEM, mismas
     # Reference http://www.eol.ucar.edu/projects/ceop/dm/documents/refdata_report/eqns.html
     # Tc = ne.evaluate("Temp_corr - 273.15")
     # es_corr = ne.evaluate("6.112 * exp((17.67 * (Temp_corr - 273.15))/((Temp_corr - 273.15) + 243.5))")
-    ea_corr = ne.evaluate("(ea_ref / es_ref) * es_elev")  # Set actual vapor pressure equal to reference RH
-    ea_corr[isinf(ea_corr)] = 0.0001
-    ea_corr[isnan(ea_corr)] = 0.0001
-    ea_corr[ea_corr <= 0] = 0.0001
-    ea_corr[mismask] = 0.0001
+    #ea_corr = ne.evaluate("(ea_ref / es_ref) * es_elev")  # Set actual vapor pressure equal to reference RH
+    #ea_corr[isinf(ea_corr)] = 0.0001
+    #ea_corr[isnan(ea_corr)] = 0.0001
+    #ea_corr[ea_corr <= 0] = 0.0001
+    #ea_corr[mismask] = 0.0001
     # p_mb = ne.evaluate("Pres_corr / 100.0")
     # p_mb = ne.evaluate("Pres_corr / 100.0")
     # Qag = pcr.numpy2pcr(Scalar, ea_corr, FillVal)
@@ -611,7 +685,7 @@ def correctQ_RH(relevantDataFields, Tmax, Tmin, highResDEM, resLowResDEM, mismas
     # rh_corr[rh_corr < 0.0] = FillVal
 
 
-    # Q_corr = ne.evaluate("ea_corr * eps / ( Pres_corr - ea_corr)",optimization='aggressive')
+    # Q_corr = ne.evaluate("ea_corr * eps / ( Pres_corr - ea_corr)")
     # Q_corr[isinf(Q_corr)] = FillVal
 
     # Q_corr = ne.evaluate("(0.622 * ea_corr) / ((Pres_corr/100)- (0.378 * ea_corr))") #Calculate equivalent Q at RH w/ elevation adjusted T, Pressure
@@ -619,14 +693,30 @@ def correctQ_RH(relevantDataFields, Tmax, Tmin, highResDEM, resLowResDEM, mismas
     ##    Qag = pcr.numpy2pcr(Scalar, Q_corr, FillVal)
     ##    aguila(Qag)
 
-    return es_elev, ea_corr
+    return es_ref, ea_ref
 
 
-def arid_cor(Tmin, ea, logger):
+def arid_cor(relevantDataFields, logger):
     # Calculate dew point after correcting for constant RH at elevation for aridity correction
-    Tdew = (np.log(ea / 1000) + 0.49299) / (
-    0.0707 - 0.00421 * np.log(ea / 1000))  # Shuttleworth, 2012 in degrees C; convert ea from Pa to kPA
-    Tmin -= 273.15  # Convert from K to degrees C to compare
+
+    Tmean = relevantDataFields[0]
+    relhumid = relevantDataFields[1]
+    Tmin = relevantDataFields[2]
+
+    es = ne.evaluate("0.6108*exp((17.27*Tmean)/(Tmean+237.3))") #saturation vapor pressure in kPa, Tmean in degrees C
+    # es = ne.evaluate("610.8*exp((17.27*(Tmean-273.15))/((Tmean-273.15)+237.3))")  #For degrees K
+    ea_mean = (es * relhumid)  # No /100, since RH is out of 1 not 100 so don't need to divide by 100
+
+    # print('Tmean ljklkjgsd', Tmean)
+    # print('Tmin ljklkjgsd', Tmin)
+    # print('RH safasdf', relhumid)
+    # print('es_ref safasdf', es)
+    # print('ea_ref fjghgfh', ea_mean)
+
+    Tdew = (np.log(ea_mean) + 0.49299) / (0.0707 - 0.00421 * np.log(ea_mean))  # Shuttleworth, 2012 in degrees C; ea in kPA
+    # print('Tdew asdfasdfa', Tdew)
+
+    # Tmin -= 273.15  # Convert from K to degrees C to compare (from METDATA units)
 
     # Check daily max difference between Tmin minus Tdew
     # Apply aridity correction where Tdew is > 5 degrees C less than Tmin to make Tdew equal to Tmin - 5
@@ -644,14 +734,13 @@ def arid_cor(Tmin, ea, logger):
     # nlcd_nm_wgs84_AgWetlands_sm.tif  (Includes 81, 82, 90, 95), 255 = no class
     path = 'DEM/'
     # NLCDAg_file = 'nlcd_nm_wgs84_Agfields_sm.tif'
-    NLCDAg_file = 'nlcd_nm_wgs84_AgWetlands_sm.tif '
-    resX, resY, cols, rows, LinkeLong, LinkeLat, NLCDAg, FillVal = readMap((os.path.join(path, NLCDAg_file)), 'Gtiff',
+    NLCDAg_file = 'nlcd_nm_wgs84_AgWetlands_LCC.tif'
+    resX, resY, cols, rows, LinkeLong, LinkeLat, NLCDAg, prj, FillVal = readMap((os.path.join(path, NLCDAg_file)), 'Gtiff',
                                                                            logger)
     Tmindif = Tmin - Tdew
 
     Tdew_cor = Tdew
-    Tdew_cor = where((NLCDAg != 255) & (Tmindif > 2),
-                     Tmin - 2.0, Tdew)
+    Tdew_cor = where((NLCDAg != 255) & (Tmindif > 2), Tmin - 2.0, Tdew)
     # Mask Tmindif to exclude areas that are not agricultural crops
     # Tmindif = np.ma.masked_where(NLCDAg != 82, Tmindif, copy=True)
     #Tmindif = np.ma.masked_where(NLCDAg == 255, Tmindif,
@@ -669,18 +758,24 @@ def arid_cor(Tmin, ea, logger):
 
     # Tdew_cor = np.ma.masked_where(Tdew_cor < 0, Tdew_cor, copy=False)
     ea_cor = 0.6108 * np.exp(17.27 * Tdew_cor / (Tdew_cor + 237.3))  # (ASCE, 2005): ea in kPa, ASCE in degrees C
-    ea_cor *= 1000  # Convert kPa to Pa
+    # ea_cor *= 1000  # Convert kPa to Pa
+
+    es[es < 0.0] = FillVal
+    es[es == 0.0] = 0.00001
+    es[isinf(es)] = FillVal
 
     # Save Tdew correction difference
     # Tdew_diff = Tdew_cor - Tdew
     # Tdew_diff = np.where(Tmindif > 1, Tmindif, 0)
-    Tdew_diff = Tmin - Tdew_cor
+    # Tdew_diff = Tmin - Tdew_cor
     # Tdew_diff = Tmindif
 
-    return ea_cor, Tdew_diff
+    return ea_cor, es
 
 
 def Ra_daily(currentdate, lat):
+    # print('LATITUDE PASSED TO Ra', lat)
+
     # CALCULATE EXTRATERRESTRIAL RADIATION
     # get day of year
     tt = currentdate.timetuple()
@@ -689,18 +784,19 @@ def Ra_daily(currentdate, lat):
     LatRad = ne.evaluate("lat*pi/180.0")
     # declination (rad)
     declin = ne.evaluate("0.4093*(sin(((2.0*pi*JULDAY)/365.0)-1.39))")
-
     # sunset hour angle
     # arccosInput = ne.evaluate("-1*(tan(LatRad))*(tan(declin))")
     arccosInput = -1 * (np.tan(LatRad)) * np.tan(declin)
+    # print(arccosInput)
+
     arccosInput = np.minimum(1, arccosInput)
     arccosInput = np.maximum(-1, arccosInput)
-    sunangle = ne.evaluate("arccos(arccosInput)") #Sunset hour angle (rads)
+    sunangle = ne.evaluate("arccos(arccosInput)")
     #    # distance of earth to sun
     distsun = ne.evaluate("1+0.033*(cos((2*pi*JULDAY)/365.0))")
     # Ra = water equivalent extra terrestiral radiation in MJ day-1
     Ra = ne.evaluate("((24 * 60 * 0.082) / 3.14) * distsun * (sunangle*(sin(LatRad))*(sin(declin))+(cos(LatRad))*(cos(declin))*(sin(sunangle)))")
-    Ra[Ra < 0] = 0
+    # Ra[Ra < 0] = 0
     # Raag = numpy2pcr(Scalar, Ra, 0.0)
     # aguila(Raag)
 

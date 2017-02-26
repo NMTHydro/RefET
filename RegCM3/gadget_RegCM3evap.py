@@ -1,5 +1,5 @@
 """
-Determine downscaled reference PM ETr evaporation from the METDATA forcing (From NLDAS-2 data combined with PRISM data)
+Determine downscaled reference PM ETr evaporation from the RegCM3 future climate scenario forcing
 
 usage:
 
@@ -17,12 +17,11 @@ import datetime
 from numpy import *
 import numpy as np
 import numexpr as ne
-from e2o_utils import *
+from RegCM3_utils import *
 # import scikits.hydroclimpy
-import gc
 # import psutil
 import time
-from gadget_lib import *
+from gadgetRegCM3_lib import *
 #from memory_profiler import profile
 
 nthreads = 2
@@ -42,24 +41,24 @@ def usage(*args):
     sys.exit(0)
 
 
-def save_as_mapsstack(lat, lon, data, times, directory, prefix="GADGET", oformat="Gtiff"):
+def save_as_mapsstack(lat, lon, data, times, directory, prj, prefix="GADGET", oformat="Gtiff"):
     cnt = 0
     if not os.path.exists(directory):
         os.mkdir(directory)
     for a in times:
-        mapname = getmapname(cnt, prefix, date)
+        mapname = getmapname(cnt, prefix)
         # print "saving map: " + os.path.join(directory,mapname)
         # writeMap(os.path.join(directory,mapname),oformat,lon,lat[::-1],flipud(data[cnt,:,:]),-999.0)
-        writeMap(os.path.join(directory, mapname), oformat, lon, lat, data[cnt, :, :], -999.0)
+        writeMap(os.path.join(directory, mapname), oformat, lon, lat, data[cnt, :, :], prj, -999.0)
         cnt = cnt + 1
 
 
-def save_as_gtiff(lat, lon, data, ncnt, directory, prefix, oformat='GTiff'):
+def save_as_gtiff(lat, lon, data, ncnt, directory, prefix, prj, oformat='GTiff'):
     if not os.path.exists(directory):
         os.mkdir(directory)
     mapname = prefix + '.tif'
     # print "saving map: " + os.path.join(directory,mapname)
-    writeMap(os.path.join(directory, mapname), oformat, lon, lat[::-1], flipud(data[:, :]), -999.0)
+    writeMap(os.path.join(directory, mapname), oformat, lon, lat[::-1], flipud(data[:, :]), prj, -999.0)
 
 
 #### MAIN ####
@@ -75,12 +74,13 @@ def main(argv=None):
     wrrsetroot = '\\NLDAS'
 
     # available variables with corresponding file names and standard_names as in NC files
-    variables = ['MaxTemperature', 'MinTemperature', 'NearSurfaceSpecificHumidity', \
-                 'SurfaceIncidentShortwaveRadiation', 'SurfaceWindSpeed']
-    filenames = ["METDATA_M_", "METDATA_M_", "METDATA_M_", "METDATA_M_", "METDATA_M_", "METDATA_M_"]
-    standard_names = ['Daily Maximum Temperature', 'Daily Minimum Temperature', 'Daily mean specific humidity', \
-                      'Daily Mean downward shortwave radiation at surface', 'Daily Mean Wind Speed']
+    variables = ['TA', 'RHA', 'TAMINA', 'SWI', 'UA', 'VA']
+    folders = ['Tavg', 'RH', 'Tmin', 'RadSW', 'WindU', 'WindV']
+    # filenames = [os.path.join(fold, 'RegCM3_{}_'.format(var)) for var, fold in zip(variables, folders)]
 
+
+    filenames = ["RegCM3Monthly_", "RegCM3Monthly_", "RegCM3Monthly_", "RegCM3Monthly_", "RegCM3Monthly_", "RegCM3Monthly_"]
+    standard_names = ['TA', 'RHA', 'TAMINA', 'SWI', 'UA', 'VA']
     prefixes = ["Tmean", "uWind", "PSurf", "Qair",
                 "Rainf", "SWdown", "Snowf", "vWind"]
 
@@ -124,7 +124,7 @@ def main(argv=None):
         if o == '-S': StartStep = int(a)
         if o == '-l': exec "loglevel = logging." + a
 
-    logger = setlogger("gadget_METDATAevap.log", "gadget_METDATAevap", level=loglevel)
+    logger = setlogger("gadget_RegCM3evap.log", "gadget_METDATAevap", level=loglevel)
     # logger, ch = setlogger("e2o_getvar.log","e2o_getvar",level=loglevel)
     logger.info("Reading settings from ini: " + inifile)
     theconf = iniFileSetUp(inifile)
@@ -168,8 +168,8 @@ def main(argv=None):
 
     if downscaling == 'True' or resampling == "True":
         # get grid info
-        resX, resY, cols, rows, highResLon, highResLat, highResDEM, FillVal = readMap(FNhighResDEM, 'GTiff', logger)
-        LresX, LresY, Lcols, Lrows, lowResLon, lowResLat, lowResDEM, FillVal = readMap(FNlowResDEM, 'GTiff', logger)
+        resX, resY, cols, rows, highResLon, highResLat, highResDEM, prj, FillVal = readMap(FNhighResDEM, 'GTiff', logger)
+        LresX, LresY, Lcols, Lrows, lowResLon, lowResLat, lowResDEM, prj, FillVal = readMap(FNlowResDEM, 'GTiff', logger)
         # writeMap("DM.MAP","PCRaster",highResLon,highResLat,highResDEM,FillVal)
         # elevationCorrection, highResDEM, resLowResDEM = resampleDEM(FNhighResDEM,FNlowResDEM,logger)
         demmask = highResDEM != FillVal
@@ -183,6 +183,13 @@ def main(argv=None):
 
         lowResDEM[Lmismask] = FillVal
         elevationCorrection = highResDEM - resLowResDEM
+        # lons = highResLon
+        # lats = highResLat
+        #print('Elevation Correction', elevationCorrection.shape)
+        #print('Lats sdfsdfsd', lats)
+        #print('Lats sdfsdfsd', long)
+        #save_as_gtiff(lats, lons, elevationCorrection, 0, odir, 'ElevCorrect', prj)
+
 
     # Check whether evaporation should be calculated
     calculateEvap = configget(logger, theconf, "selection", "calculateEvap", calculateEvap)
@@ -191,8 +198,7 @@ def main(argv=None):
         evapMethod = configget(logger, theconf, "selection", "evapMethod", evapMethod)
 
     if evapMethod == 'PenmanMonteith':
-        relevantVars = ['MaxTemperature', 'MinTemperature', 'NearSurfaceSpecificHumidity',
-                        'SurfaceIncidentShortwaveRadiation', 'SurfaceWindSpeed']
+        relevantVars = ['TA', 'RHA', 'TAMINA', 'SWI', 'UA', 'VA']
 
     currentdate = start
     ncnt = 0
@@ -210,7 +216,7 @@ def main(argv=None):
             downscale(ncnt, currentdate, filenames, variables, standard_names, serverroot, wrrsetroot, relevantVars,
                       elevationCorrection, BB, highResLon, highResLat, resLowResDEM, highResDEM, lowResLon, lowResLat,
                       lowResDEM, logger, radcordir, odir, oprefix, lonmax, lonmin, latmax, latmin, downscaling,
-                      resamplingtype, oformat, saveAllData, FillVal)
+                      resamplingtype, oformat, saveAllData, prj, FillVal)
 
         gc.collect()
         currentdate += datetime.timedelta(days=1)
