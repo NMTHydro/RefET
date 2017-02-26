@@ -165,7 +165,8 @@ def PenmanMonteith(currentdate, relevantDataFields, Ra, es_mean, ea_mean, Rnet, 
     # slope of vapour pressure [Pa C-1]
     # deltop  = 4098. *(610.8*np.exp((17.27*(Tmean-273.15))/((Tmean-273.15)+237.3)))
     # delbase = ((Tmean-273.15)+237.3)**2
-    delta = ne.evaluate("4098. * es_mean / ((Tmean-273.15)+237.3)**2")  # deltop/delbase [Pa C-1]
+    # delta = ne.evaluate("4098. * es_mean / ((Tmean-273.16)+237.3)**2")  # deltop/delbase [Pa C-1]  #Delta calculated using K from METDATA
+    delta = ne.evaluate("4098. * es_mean / ((Tmean)+237.3)**2")
     ##    delta[isnan(delta)] = 0
     ##    PETag = pcr.numpy2pcr(Scalar, delta, 0.0)
     ##    aguila(PETag)
@@ -182,8 +183,11 @@ def PenmanMonteith(currentdate, relevantDataFields, Ra, es_mean, ea_mean, Rnet, 
     # Wsp_2 = Wsp*3.44/(np.log(16.3*z-5.42))         # Measured over 0.50 m tall crop height = [m s-1]
     # ra = 110./Wsp_2                                # 0.50 m tall crop height = [s m-1]
 
+    #Convert Tmean (C) to K
+    Tmean += 273.15
+
     PETmm = np.maximum((delta * np.maximum(0, (Rnet)) + (Pres / (Tmean * R)) * cp * np.maximum(es_mean - (ea_mean),
-                                                                                               0.) / (110. / Wsp_2)), 1)  #
+                                                                                               0.) / (110. / Wsp_2)), 1)
     PETmm /= np.maximum(
         ne.evaluate("(delta + (cp*Pres/(eps*(2.501-(0.002361*(Tmean-273.15)))*1e6))*(1+(rs/(110./Wsp_2))))"), 1)
     # PET     = np.maximum(PETtop/PETbase, 0)
@@ -197,7 +201,7 @@ def PenmanMonteith(currentdate, relevantDataFields, Ra, es_mean, ea_mean, Rnet, 
     else:
         pass
 
-    return PETmm, Wsp
+    return PETmm, Wsp, delta
 
 
 def downscale(ncnt, currentdate, filenames, variables, standard_names, serverroot, wrrsetroot, relevantVars,
@@ -359,11 +363,11 @@ def downscale(ncnt, currentdate, filenames, variables, standard_names, serverroo
 
         # print ('Length of relevantDataFields', len(relevantDataFields))
         # print '\n'.join(str(p) for p in relevantDataFields)
-        PETmm, Wsp = PenmanMonteith(currentdate, relevantDataFields, Ra, es_mean, ea_mean, Rnet, Pres)
+        PETmm, Wsp, delta = PenmanMonteith(currentdate, relevantDataFields, Ra, es_mean, ea_mean, Rnet, Pres)
         # FIll out unrealistic values
         # PETmm[mismask] = FillVal
         PETmm[isinf(PETmm)] = FillVal
-        PETmm.clip(0, 50, out=PETmm)
+        # PETmm.clip(0, 50, out=PETmm)
 
         logger.info("Saving PM PET data for: " + str(currentdate))
         save_as_mapsstack_per_day(lats, lons, PETmm, int(ncnt), currentdate, odir, prj, prefix=oprefix, oformat=oformat,
@@ -380,12 +384,14 @@ def downscale(ncnt, currentdate, filenames, variables, standard_names, serverroo
         if saveAllData:
             save_as_mapsstack_per_day(lats, lons, relevantDataFields[0], int(ncnt), currentdate, odir, prj, prefix='Tmean',
                                       oformat=oformat, FillVal=FillVal)
-            save_as_mapsstack_per_day(lats, lons, relevantDataFields[1], int(ncnt), currentdate, odir, prj, prefix='RH',
+            save_as_mapsstack_per_day(lats, lons, delta, int(ncnt), currentdate, odir, prj, prefix='delta',
                                       oformat=oformat, FillVal=FillVal)
-            save_as_mapsstack_per_day(lats, lons, rh_cor, int(ncnt), currentdate, odir, prj, prefix='RH_cor',
-                                      oformat=oformat, FillVal=FillVal)
-            save_as_mapsstack_per_day(lats, lons, Rlnet_Watt, int(ncnt), currentdate, odir, prj, prefix='Rlnet',
-                                      oformat=oformat, FillVal=FillVal)
+            # save_as_mapsstack_per_day(lats, lons, relevantDataFields[1], int(ncnt), currentdate, odir, prj, prefix='RH',
+            #                           oformat=oformat, FillVal=FillVal)
+            # save_as_mapsstack_per_day(lats, lons, rh_cor, int(ncnt), currentdate, odir, prj, prefix='RH_cor',
+            #                           oformat=oformat, FillVal=FillVal)
+            # save_as_mapsstack_per_day(lats, lons, Rlnet_Watt, int(ncnt), currentdate, odir, prj, prefix='Rlnet',
+            #                           oformat=oformat, FillVal=FillVal)
             # save_as_mapsstack_per_day(lats, lons, Pres, int(ncnt), currentdate, odir, prj, prefix='PRESS',
             #                            oformat=oformat, FillVal=FillVal)
             # save_as_mapsstack_per_day(lats, lons, Ra, int(ncnt), currentdate, odir, prj, prefix='Ra', oformat=oformat,
