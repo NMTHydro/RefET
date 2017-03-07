@@ -27,37 +27,9 @@ def save_as_mapsstack_per_day(lat, lon, data, ncnt, date, directory, prj, prefix
         if 'Linux' in platform.system():
             os.system('gzip ' + os.path.join(directory, mapname))
 
-
 # @profile
-def Rnet_PM(elev, Ra, ea_mean, relevantDataFields):
-    alpha = 0.23  # reference surface albedo
-    sigma = 4.903e-9  # stephan boltzmann [W m-2 K-4 day]
+def PenmanMonteith(currentdate, relevantDataFields, rtoa, es_mean, ea_mean, Pres, elev):
 
-    Tmean = relevantDataFields[0] + 273.16 #Convert C to K for Rnl formula
-    # relhumid = relevantDataFields[2]
-    #Tmax = relevantDataFields[0]
-    #Tmin = relevantDataFields[1]
-    Rsin = relevantDataFields[3]
-
-
-    # clear sky solar radiation MJ d-1
-    Rso = np.maximum(0.1, ne.evaluate("(0.75+(2*0.00005*elev)) * Ra"))  # add elevation correction term elev with 5*10-5
-    Rlnet_Watt = - sigma * ((Tmean ** 4) * (0.34 - 0.14 * np.sqrt(np.maximum(0, (ea_mean)))) \
-                            * (1.35 * np.minimum(1, ((Rsin * 0.0864) / Rso)) - 0.35))
-    Rlnet_Watt /= 0.0864  # MJ d-1 to Watts
-
-    ##    a = np.zeros(3)
-    ##    a[0] = np.nan
-    ##    a[1] = np.inf
-    ##    a[2] = -np.inf
-    Rnet = (1 - alpha) * Rsin + Rlnet_Watt
-    ##    Rnet = np.select([Rnet < -100, Rnet == a[0], Rnet == a[1], Rnet == a[2]], [0,0,0,0])
-
-    return Rnet, Rlnet_Watt
-
-
-# @profile
-def PenmanMonteith(currentdate, relevantDataFields, Ra, es_mean, ea_mean, Rnet, Pres):
     """
 
     :param lat:
@@ -72,24 +44,24 @@ def PenmanMonteith(currentdate, relevantDataFields, Ra, es_mean, ea_mean, Rnet, 
     """
 
     Tmean = relevantDataFields[0]
+    Ua = relevantDataFields[4]
+    Uv = relevantDataFields[5]
     #Tmax = relevantDataFields[0]
     #Tmin = relevantDataFields[1]
     # Q       =  relevantDataFields[2]
-    # Rsin    =  relevantDataFields[3]
-    Ua = relevantDataFields[4]
-    Uv = relevantDataFields[5]
+    Rsin    =  relevantDataFields[3]
     #Pres = relevantDataFields[5]
     # Q       =  relevantDataFields[6]
 
     #Calculate resultant wind speed by taking sqrt of north and west vectors
     Wsp = np.sqrt(Ua**2 + Uv**2)
 
+    # Convert C to K for Rnl, delta, and RefET calculation
+    Tmean = relevantDataFields[0] + 273.16
+
     # Convert kPa to Pa for consistent units
-    ea_mean *= 1000
-    es_mean *= 1000
-
-
-    #Tmean = (relevantDataFields[0] + relevantDataFields[1]) / 2
+    ea_mean *= 1000.0
+    es_mean *= 1000.0
 
     """
     Computes Penman-Monteith reference evaporation
@@ -111,7 +83,7 @@ def PenmanMonteith(currentdate, relevantDataFields, Ra, es_mean, ea_mean, Rnet, 
     karman = 0.41  # von Karman constant [-]
     vegh = 0.50  # vegetation height [m]
     alpha = 0.23  # albedo, 0.23 [-]
-    rs = 45  # surface resistance, 70 [s m-1]
+    rs = 45  # surface resistance, 70 [s m-1] for grass reference
     R = 287.058  # Universal gas constant [J kg-1 K-1]
     convmm = 1000 * TimeStepSecs  # conversion from meters to millimeters
     sigma = 4.903e-9  # stephan boltzmann [W m-2 K-4 day]
@@ -121,59 +93,37 @@ def PenmanMonteith(currentdate, relevantDataFields, Ra, es_mean, ea_mean, Rnet, 
     Mo = 0.0289644  # molecular weight of gas [g / mol]
     lapse_rate = 0.0065  # lapse rate [K m-1]
 
-    # CALCULATE ACTUAL VAPOR PRESSURE
-    # saturation vapour pressure [Pa]
-    ##    es = lambda T:610.8*np.exp((17.27*(Tmean-273.15))/((Tmean-273.15)+237.3))
-    ##    es_min  = es(Tmin)
-    ##    es_max  = es(Tmax)
-    ##    es_mean = (es_min+es_max)/2.
-    ##    #es_mean = es(Tmean)
-    ##    #Rsinag = pcr.numpy2pcr(Scalar, es_mean, 0.0)
-    ##    #aguila(Rsinag)
-    ##
-    ##    # actual vapour pressure
-    ##    ea = lambda Pres, Q, eps: -(Q*Pres)/((eps-1)*Q-eps)
-    ##    ea_mean_kPa = ea(Pres, Q, eps) / 1000
-    ##    #ea_mean_kPa = ea_mean / 1000
-    ##    #Rsinag2 = pcr.numpy2pcr(Scalar, ea_mean_kPa, 0.0)
-    ##    #aguila(Rsinag2)
-
     # clear sky solar radiation MJ d-1
-    # Rso = np.maximum(0.1, ne.evaluate("(0.75+(2*0.00005*elev)) * Ra"))  #add elevation correction term elev with 5*10-5
+    Rso = np.maximum(0.1, ne.evaluate("(0.75+(2*0.00005*elev)) * rtoa"))  # add elevation correction term elev with 5*10-5
 
-    ##    Rsin_MJ = 0.086400 * Rsin
-    #    Clear = Rsin_MJ / Rso
-    #    Rsinag = pcr.numpy2pcr(Scalar, Clear, 0.0)
-    #    aguila(Rsinag)
+    #Tmean in K, ea_mean in Pa (/ 1000 to get kPa), rsin in W/m^2 (*0.0864 for MJ d-1)
+    Rlnet_Watt = - sigma * ((Tmean ** 4) * (0.34 - 0.14 * np.sqrt(np.maximum(0, (ea_mean/1000))))
+                            * (1.35 * np.minimum(1, ((Rsin * 0.0864) / Rso)) - 0.35))
+    Rlnet_Watt /= 0.0864  # MJ d-1 to Watts
 
-    # Rlnet_Watt = - sigma * ( ((Tmin**4 + Tmax**4)/2) * (0.34 - 0.14 * np.sqrt(np.maximum(0,(ea_mean/1000)))) * (1.35*np.minimum(1,((Rsin*0.0864) / Rso))-0.35)) / 0.0864
-    # ea_mean in Pa / 1000 to get kPa
+    Rnet = np.maximum(0, ((1-alpha) * Rsin + Rlnet_Watt))
 
-    # Rlnet_Watt = Rlnet_MJ / 0.086400
+    #vapour pressure deficit
+    vpd = np.maximum(es_mean - ea_mean, 0.)
 
-    # Rnet  = np.maximum(0,((1-alpha)*Rsin + Rlnet_Watt))
 
-    # vapour pressure deficit
-    # vpd = np.maximum(es_mean - ea_mean, 0.)
-
+    #Virtual temperature
+    Tkv = Tmean * (1-0.378*(ea_mean/Pres))**-1
     # density of air [kg m-3]
-    # rho = Pres/(Tmean*R)
+    rho = Pres/(Tkv*R)
 
     # Latent heat [J kg-1]
-    # Lheat = (2.501-(0.002361*(Tmean-273.15)))*1e6
+    Lheat = (2.501-(0.002361*(Tmean-273.15)))*1e6
 
     # slope of vapour pressure [Pa C-1]
-    # deltop  = 4098. *(610.8*np.exp((17.27*(Tmean-273.15))/((Tmean-273.15)+237.3)))
-    # delbase = ((Tmean-273.15)+237.3)**2
-    # delta = ne.evaluate("4098. * es_mean / ((Tmean-273.16)+237.3)**2")  # deltop/delbase [Pa C-1]  #Delta calculated using K from METDATA
-    delta = ne.evaluate("4098. * es_mean / ((Tmean)+237.3)**2")
-    ##    delta[isnan(delta)] = 0
-    ##    PETag = pcr.numpy2pcr(Scalar, delta, 0.0)
-    ##    aguila(PETag)
-    ##    print(delta)
+    deltop  = 4098. *(610.8*np.exp((17.27*(Tmean-273.15))/((Tmean-273.15)+237.3)))
+    delbase = ((Tmean-273.15)+237.3)**2
+    delta = deltop/delbase
+    # print('delta ', delta)
 
     # psychrometric constant
-    # gamma   = cp*Pres/(eps*Lheat)
+    gamma = cp*Pres/(eps*Lheat)
+    # print('gamma ', gamma)
 
     # aerodynamic resistance
     z = 10  # height of wind speed variable (10 meters above surface)
@@ -181,17 +131,12 @@ def PenmanMonteith(currentdate, relevantDataFields, Ra, es_mean, ea_mean, Rnet, 
     # ra = 208./Wsp_2                                # 0.13 m short crop height = [s m-1]
 
     # Wsp_2 = Wsp*3.44/(np.log(16.3*z-5.42))         # Measured over 0.50 m tall crop height = [m s-1]
-    # ra = 110./Wsp_2                                # 0.50 m tall crop height = [s m-1]
+    ra = 110./Wsp_2                                  # 0.50 m tall crop height = [s m-1]
 
-    #Convert Tmean (C) to K
-    Tmean += 273.15
 
-    PETmm = np.maximum((delta * np.maximum(0, (Rnet)) + (Pres / (Tmean * R)) * cp * np.maximum(es_mean - (ea_mean),
-                                                                                               0.) / (110. / Wsp_2)), 1)
-    PETmm /= np.maximum(
-        ne.evaluate("(delta + (cp*Pres/(eps*(2.501-(0.002361*(Tmean-273.15)))*1e6))*(1+(rs/(110./Wsp_2))))"), 1)
-    # PET     = np.maximum(PETtop/PETbase, 0)
-    PETmm *= ne.evaluate("((TimeStepSecs/((2.501-(0.002361*(Tmean-273.15)))*1e6)))")
+    PETmm = np.maximum(ne.evaluate("(delta * Rnet) + ((rho * cp * vpd) / ra)"), 1)
+    PETmm /= np.maximum(ne.evaluate("(delta + gamma*(1 + rs/ra))"), 1)
+    PETmm *= ne.evaluate("(TimeStepSecs / Lheat)")
 
     # PETag = pcr.numpy2pcr(Scalar, PETmm, 0.0)
     # aguila(PETag)
@@ -212,8 +157,10 @@ def downscale(ncnt, currentdate, filenames, variables, standard_names, serverroo
     start_steptime = time.time()
 
     #Need to read in actual lat / long of high-resolution grid
+    #Change data highResDEM to highResDEMlatlong so doesn't overwrite LCC elevation values
+    #Change prj to prj_WGS84 so radiation, refet rasters have correct LCC project not WGS84
     highresDEMwgs84 = 'DEM/NMbufferMatchLCCasWGS84.tif'
-    resX, resY, cols, rows, highResLondeg, highResLatdeg, highResDEM, prj, Fills = readMap(highresDEMwgs84, 'GTiff', logger)
+    resX, resY, cols, rows, highResLondeg, highResLatdeg, highResDEMlatlong, prj_WGS84, Fills = readMap(highresDEMwgs84, 'GTiff', logger)
 
     # lons = highResLon
     # lats = highResLat
@@ -272,17 +219,17 @@ def downscale(ncnt, currentdate, filenames, variables, standard_names, serverroo
                     # save_as_mapsstack_per_day(lats, lons, mean_as_map, int(ncnt), currentdate, odir, prj,
                     #                           prefix='Tmean_early',
                     #                           oformat=oformat, FillVal=FillVal)
-                    mean_as_map, tempavg = correctTemp(mean_as_map, elevationCorrection, FillVal)
+                    mean_as_map = correctTemp(mean_as_map, elevationCorrection, FillVal)
                     # print('Corrected average temperature', tempavg)
                     # print('Data dimensions{}'.format(mean_as_map.shape))
                 if variables[i] == 'TAMINA':
-                    mean_as_map, tempmin = correctTemp(mean_as_map, elevationCorrection, FillVal)
+                    mean_as_map = correctTemp(mean_as_map, elevationCorrection, FillVal)
                 # if variables[i] == 'RHA':
                     # relhum = mean_as_map
                     # print('average RH mean', relevantDataFields[2])
                     # print('average RH', relhum)
                 if variables[i] == 'SWI':
-                    mean_as_map, Ra = correctRsin(mean_as_map, currentdate, radcordir, LATITUDE, logger, FillVal)
+                    mean_as_map, rtoa = correctRsin(mean_as_map, currentdate, radcordir, LATITUDE, logger, FillVal)
                 mean_as_map[mismask] = FillVal
 
                 relevantDataFields.append(mean_as_map)
@@ -328,12 +275,6 @@ def downscale(ncnt, currentdate, filenames, variables, standard_names, serverroo
                         lons = ncstepobj.lon
                         lats = ncstepobj.lat
 
-        # Correct Pressure separately since no data in METDATA netCDF file
-        # mean_as_map = correctPres(relevantDataFields, highResDEM, resLowResDEM, FillVal=FillVal)
-        # # mismask = mean_as_map == FillVal
-        # # mean_as_map[mismask] = FillVal
-        # relevantDataFields.append(mean_as_map)
-
         Pres = correctPres(relevantDataFields, highResDEM, resLowResDEM, FillVal=FillVal)
         # mismask = mean_as_map == FillVal
         # mean_as_map[mismask] = FillVal
@@ -356,14 +297,9 @@ def downscale(ncnt, currentdate, filenames, variables, standard_names, serverroo
         # ea_arid = ea_mean
         # ea_arid.clip(0, 10000, out=ea_arid)
 
-        # Calculate Net radiation input for PM energy term
-        Rnet, Rlnet_Watt = Rnet_PM(highResDEM, Ra, ea_mean, relevantDataFields)
-        # Rlnet_Watt.clip(0, 500, out=Rlnet_Watt)
-        # Rnet.clip(0, 500, out=Rnet)
-
         # print ('Length of relevantDataFields', len(relevantDataFields))
         # print '\n'.join(str(p) for p in relevantDataFields)
-        PETmm, Wsp, delta = PenmanMonteith(currentdate, relevantDataFields, Ra, es_mean, ea_mean, Rnet, Pres)
+        PETmm, Wsp, delta = PenmanMonteith(currentdate, relevantDataFields, rtoa, es_mean, ea_mean, Pres, highResDEM)
         # FIll out unrealistic values
         # PETmm[mismask] = FillVal
         PETmm[isinf(PETmm)] = FillVal
@@ -372,7 +308,7 @@ def downscale(ncnt, currentdate, filenames, variables, standard_names, serverroo
         logger.info("Saving PM PET data for: " + str(currentdate))
         save_as_mapsstack_per_day(lats, lons, PETmm, int(ncnt), currentdate, odir, prj, prefix=oprefix, oformat=oformat,
                                   FillVal=FillVal)
-        save_as_mapsstack_per_day(lats, lons, relevantDataFields[3], int(ncnt), currentdate, odir, prj, prefix='SWI',
+        save_as_mapsstack_per_day(lats, lons, relevantDataFields[3], int(ncnt), currentdate, odir, prj, prefix='RTOT',
                                    oformat=oformat, FillVal=FillVal)
         #save_as_mapsstack_per_day(lats,lons,Rnet,int(ncnt),currentdate,odir,prefix='RNET',oformat=oformat,FillVal=FillVal)
         # save_as_mapsstack_per_day(lats,lons,Rlnet_Watt,int(ncnt),currentdate,odir,prefix='RLIN',oformat=oformat,FillVal=FillVal)
@@ -398,8 +334,6 @@ def downscale(ncnt, currentdate, filenames, variables, standard_names, serverroo
             #                           FillVal=FillVal)
             # save_as_mapsstack_per_day(lats, lons, Wsp, int(ncnt), currentdate, odir, prj, prefix='Wsp', oformat=oformat,
             #                           FillVal=FillVal)
-            save_as_mapsstack_per_day(lats, lons, Rnet, int(ncnt), currentdate, odir, prj, prefix='Rnet',
-                                      oformat=oformat, FillVal=FillVal)
             # save_as_mapsstack_per_day(lats, lons, ea_mean, int(ncnt), currentdate, odir, prj, prefix='ea',
             #                           oformat=oformat, FillVal=FillVal)
             # save_as_mapsstack_per_day(lats, lons, es_mean, int(ncnt), currentdate, odir, prj, prefix='es',
@@ -417,17 +351,8 @@ def downscale(ncnt, currentdate, filenames, variables, standard_names, serverroo
             # 'SurfaceIncidentShortwaveRadiation','SurfaceWindSpeed','Pressure','CorrectedQ']
 
         # Empty calculated arrays
-        relevantDataFields = []
-        PETmm = []
-        Tmin = []
-        Tmax = []
-        Ra = []
-        es_mean = []
-        ea_mean = []
-        Rnet = []
-        Rlnet_Watt = []
-        gc.collect()
         compsteptime = (time.time() - start_steptime)
+        print(str(currentdate) + ' Computation time: ' + str(compsteptime) + ' seconds' + '\n')
         #a = open("gadgetevap_comptime.txt", "a")
         #a.write(str(currentdate) + ' Computation time: ' + str(compsteptime) + ' seconds' + '\n')
         #a.close()
@@ -463,7 +388,7 @@ def correctTemp(Temp, elevationCorrection, FillVal):
     # Temp_cor[Temp_cor == 0.0] = FillVal
     # Temp_cor[isinf(Temp_cor)] = FillVal
 
-    return Temp_cor, Temp_cor
+    return Temp_cor
 
 
 def correctRsin(Rsin, currentdate, radiationCorDir, lat, logger, FillVal):
@@ -483,12 +408,12 @@ def correctRsin(Rsin, currentdate, radiationCorDir, lat, logger, FillVal):
     topoDEM = 'RadWm2'
 
     # Get daily Extraterrestrial radiation
-    Ra, sunset = Ra_daily(currentdate, lat)
+    rtoa, sunset = Ra_daily(currentdate, lat)
 
-    Ra /= 0.0864 #Convert from MJ day-1 to W m-2 day
+    rtoa /= 0.0864 #Convert from MJ day-1 to W m-2 day
 
     # Calculate clearness index (kt) using Ra, adjust with optical path if Kt >= 0.65
-    kt = np.maximum(np.minimum(ne.evaluate("Rsin/Ra"), 1), 0.0001)
+    kt = np.maximum(np.minimum(ne.evaluate("Rsin/rtoa"), 1), 0.0001)
 
     # Use Ruiz-Ariaz, 2010b elevation function instead of Opcorr? Or saved Opcorr from hourly algorithm?
     #np.select([kt >= 0.65, kt < 0.65], [Rsin * Opcorr, Rsin])
@@ -552,7 +477,7 @@ def correctRsin(Rsin, currentdate, radiationCorDir, lat, logger, FillVal):
     Rg_DEM[Rsin == 0.0] = 0.00001
     Rg_DEM[isinf(Rsin)] = FillVal
 
-    return Rg_DEM, Ra
+    return Rg_DEM, rtoa
 
 
 def correctPres(relevantDataFields, highResDEM, resLowResDEM, FillVal=1E31):
@@ -597,111 +522,6 @@ def correctPres(relevantDataFields, highResDEM, resLowResDEM, FillVal=1E31):
 
     return Pres_corr
 
-
-# @profile
-def correctQ_RH(Tmean, RH, highResDEM, resLowResDEM, FillVal=1E31):
-    """
-    Constant Relative Humidity with elevation using datum specific humidity and temperature
-
-    inputs:
-    Temperature             = daily mean, min or max temperature (degrees Celcius)
-    Elevation correction    = difference between high resolution and low resolution (4 km) DEM  [m]
-
-   relevantDataFields : ['MaxTemperature','MinTemperature','NearSurfaceSpecificHumidity',\
-                         'SurfaceIncidentShortwaveRadiation','SurfaceWindSpeed','Pressure','CorrectedSpecificHumidity']
-
-    """
-
-    # constants:
-    g = 9.81  # gravitational constant [m s-2]
-    R_air = 8.3144621  # specific gas constant for dry air [J mol-1 K-1]
-    Mo = 0.0289644  # molecular weight of gas [g / mol]
-    lapse_rate = 0.0065  # lapse rate [K m-1]
-    eps = 0.622  # ratio of water vapour/dry air molecular weights [-]
-    FillVal = 1E31
-    R = 287.058  # Specific gas constant for dry air [J kg-1 K-1]
-    rv = 461  # Specific gas constant for water vapor[J kg-1 K-1]
-    eps = 0.622  # ratio of water vapour/dry air molecular weights (R / rv) [-]
-
-    #Temp_corr = (relevantDataFields[0] + relevantDataFields[1]) / 2
-    #Pres_corr = relevantDataFields[5]
-    #Q = relevantDataFields[2]
-    # p_mb = relevantDataFields[5] / 1000
-    #Tmean = (Tmax + Tmin) / 2  # Original Tmean, Tmax without elevation lapse adjustment
-    # Tmean = relevantDataFields[0]
-    # RH = relevantDataFields[2]
-
-    ##    tag = pcr.numpy2pcr(Scalar, Temp_corr, FillVal)
-    ##    aguila(tag)
-    ##
-    ##    tags = pcr.numpy2pcr(Scalar, Tmean, FillVal)
-    ##    aguila(tags)
-
-    ##    elevationCorrection = ne.evaluate("highResDEM - resLowResDEM")
-    ##
-    ##    Temp_corr = ne.evaluate("Tmean + lapse_rate * elevationCorrection")
-    ##
-    ##    Pres_corr = zeros_like(Tmean)
-    ##    Pres_corr = ne.evaluate("Pressure *( (Tmean/ ( Tmean - lapse_rate * (highResDEM - resLowResDEM))) ** (g * Mo / (R_air * lapse_rate)))")
-    ##
-    ##    Pres_corr[isnan(Pres_corr)] = FillVal
-
-    # CALCULATE ACTUAL VAPOR PRESSURE
-    # saturation vapour pressure [Pa]
-    # es = lambda T:610.8*np.exp((17.27*(Tmean-273.15))/((Tmean-273.15)+237.3))
-    es_ref = ne.evaluate("610.8*exp((17.27*(Tmean-273.15))/((Tmean-273.15)+237.3))")
-    #es_elev = ne.evaluate("610.8*exp((17.27*(Temp_corr-273.15))/((Temp_corr-273.15)+237.3))")
-    #es_elev[isinf(es_elev)] = FillVal
-    ##    tag = pcr.numpy2pcr(Scalar, es_ref, FillVal)
-    ##    aguila(tag)
-
-    ##    tags = pcr.numpy2pcr(Scalar, es_elev, FillVal)
-    ##    aguila(tags)
-
-    # actual vapour pressure [Pa]
-    # ea = lambda Pres, Q, eps: -(Q*Pres)/((eps-1)*Q-eps)
-    #ea_ref = ne.evaluate("-(Q*Pres_corr)/((eps-1)*Q-eps)")
-    ea_ref = (es_ref*RH) # /100 RH is out of 1 not 100 so don't need to divide by 100
-    # ea_ref[mismask] = 0.0001
-    # ea_elev = ea(Pres_corr, Q, eps)
-    print('Tmean ljklkjgsd', Tmean)
-    print('RH safasdf', RH)
-    print('es_ref safasdf', es_ref)
-    print('ea_ref fjghgfh', es_ref)
-
-
-    # rh_ref = ne.evaluate("ea_ref / es_ref")
-    # rh_ref[rh_ref < 0.0] = FillVal
-
-    # Reference http://www.eol.ucar.edu/projects/ceop/dm/documents/refdata_report/eqns.html
-    # Tc = ne.evaluate("Temp_corr - 273.15")
-    # es_corr = ne.evaluate("6.112 * exp((17.67 * (Temp_corr - 273.15))/((Temp_corr - 273.15) + 243.5))")
-    #ea_corr = ne.evaluate("(ea_ref / es_ref) * es_elev")  # Set actual vapor pressure equal to reference RH
-    #ea_corr[isinf(ea_corr)] = 0.0001
-    #ea_corr[isnan(ea_corr)] = 0.0001
-    #ea_corr[ea_corr <= 0] = 0.0001
-    #ea_corr[mismask] = 0.0001
-    # p_mb = ne.evaluate("Pres_corr / 100.0")
-    # p_mb = ne.evaluate("Pres_corr / 100.0")
-    # Qag = pcr.numpy2pcr(Scalar, ea_corr, FillVal)
-    # aguila(Qag)
-
-
-    # rh_corr = ne.evaluate("ea_corr / es_elev")
-    # rh_corr[rh_corr < 0.0] = FillVal
-
-
-    # Q_corr = ne.evaluate("ea_corr * eps / ( Pres_corr - ea_corr)")
-    # Q_corr[isinf(Q_corr)] = FillVal
-
-    # Q_corr = ne.evaluate("(0.622 * ea_corr) / ((Pres_corr/100)- (0.378 * ea_corr))") #Calculate equivalent Q at RH w/ elevation adjusted T, Pressure
-    # rh_dif = ne.evaluate("(rh_ref*100) - (rh_corr*100)")
-    ##    Qag = pcr.numpy2pcr(Scalar, Q_corr, FillVal)
-    ##    aguila(Qag)
-
-    return es_ref, ea_ref
-
-
 def arid_cor(relevantDataFields, logger):
     # Calculate dew point after correcting for constant RH at elevation for aridity correction
 
@@ -724,17 +544,6 @@ def arid_cor(relevantDataFields, logger):
 
     # Tmin -= 273.15  # Convert from K to degrees C to compare (from METDATA units)
 
-    # Check daily max difference between Tmin minus Tdew
-    # Apply aridity correction where Tdew is > 5 degrees C less than Tmin to make Tdew equal to Tmin - 5
-    # Tmin_cor = np.ma.where(Tmin - Tdew > 5.0, Tmin)
-    # Tdew_cor = Tmin_cor - 5.0
-    # Tdew_cor = Tdew_cor.data
-    ##    Tdew5 = Tmin - 5.0
-    ##    Tdew_cor = np.ma.where(Tmin - Tdew > 5.0, Tdew5, Tdew)
-    # Tdew_cor.clip(0.00001,50,out=Tdew_cor)
-    # Tdew.clip(0.00001,50,out=Tdew)
-    # Tmin.clip(0.00001,50,out=Tmin)
-
     # Read in NLCD agricultural areas (NLCD LC 82) in raster file
     # Use NLCD 81 (Hay / Pasture), 90 (Woody Wetlands), 95 (Emergent Herbaceous Wetlands )?
     # nlcd_nm_wgs84_AgWetlands_sm.tif  (Includes 81, 82, 90, 95), 255 = no class
@@ -745,30 +554,22 @@ def arid_cor(relevantDataFields, logger):
                                                                            logger)
     Tmindif = Tmin - Tdew
 
+    # Check daily max difference between Tmin minus Tdew
+    # Apply aridity correction where Tdew is > 2 degrees C less than Tmin to make Tdew equal to Tmin - 2
     Tdew_cor = Tdew
     Tdew_cor = where((NLCDAg != 255) & (Tmindif > 2), Tmin - 2.0, Tdew)
-    # Mask Tmindif to exclude areas that are not agricultural crops
-    # Tmindif = np.ma.masked_where(NLCDAg != 82, Tmindif, copy=True)
-    #Tmindif = np.ma.masked_where(NLCDAg == 255, Tmindif,
-    #                             copy=True)  # Mask out areas not falling in selected NLCD classes
-    # NLCD = np.where(NLCDAg == 82)  # return indices for where ag fields
-    # NLCD = NLCDAg[NLCDAg == 82]
-
-    #Tdew_cor = Tdew
-    #Tdew_cor = np.ma.where(Tmindif > 4.0, Tmin - 4.0, Tdew)
-    # Tdew_cor = np.select([Tmindif > 5.0, Tmindif <= 5.0], [Tmin-5.0, Tdew])
-    #Tdew_cor.mask = np.ma.nomask  # Remove mask to perform subsequent vapor pressure calculations
-
-    # Tdew_cor = np.where(Tdew_cor < 0, 0, Tdew_cor)
-
-
-    # Tdew_cor = np.ma.masked_where(Tdew_cor < 0, Tdew_cor, copy=False)
     ea_cor = 0.6108 * np.exp(17.27 * Tdew_cor / (Tdew_cor + 237.3))  # (ASCE, 2005): ea in kPa, ASCE in degrees C
     # ea_cor *= 1000  # Convert kPa to Pa
 
     es[es < 0.0] = FillVal
     es[es == 0.0] = 0.00001
     es[isinf(es)] = FillVal
+
+    ##    tag = pcr.numpy2pcr(Scalar, Temp_corr, FillVal)
+    ##    aguila(tag)
+    ##
+    ##    tags = pcr.numpy2pcr(Scalar, Tmean, FillVal)
+    ##    aguila(tags)
 
     # Save Tdew correction difference
     # Tdew_diff = Tdew_cor - Tdew
