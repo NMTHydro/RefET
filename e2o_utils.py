@@ -728,15 +728,15 @@ def resample_grid(gridZ_in,Xin,Yin,Xout,Yout,method='nearest',FillVal=1E31):
 #    print(asarray(gridZ_in).shape)
 
     # First average if the output has a lower resolution than the input grid
-    insize = min(diff(Xin))
-    outsize = min(diff(Xout))
+    # insize = min(diff(Xin))
+    # outsize = min(diff(Xout))
     #if insize < outsize:
     #    xsize = outsize/insize
     #    gridZ_in = scipy.ndimage.filters.percentile_filter(gridZ_in,50,size=xsize)
 
     #originally flipud(gridZ_in)
     if method in 'nearest linear':
-        interobj = scipy.interpolate.RegularGridInterpolator((Ysrt,Xin), gridZ_in, method=method ,bounds_error=False,fill_value=float32(FillVal))
+        interobj = scipy.interpolate.RegularGridInterpolator((Ysrt,Xin), flipud(gridZ_in), method=method ,bounds_error=False,fill_value=float32(FillVal))
         _x, _y = meshgrid(Xout, Yout)
         yx_outpoints = transpose([_y.flatten(), _x.flatten()])
 

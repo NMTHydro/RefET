@@ -24,6 +24,7 @@ import gc
 import time
 from gadget_lib import *
 #from memory_profiler import profile
+from gadget_lib import save_as_mapsstack_per_day
 
 nthreads = 2
 start_time = time.time()
@@ -178,11 +179,26 @@ def main(argv=None):
         Lmismask = lowResDEM == FillVal
         # Fille gaps in high res DEM with Zeros for interpolation purposes
         lowResDEM[Lmismask] = 0.0
-        resLowResDEM = resample_grid(lowResDEM, lowResLon, lowResLat, highResLon, highResLat, method=resamplingtype,
-                                     FillVal=0.0)
+
+        currentdate = datetime.datetime(2000, 1, 1)
+        # save_as_mapsstack_per_day(lowResLat, lowResLon, lowResDEM, 20, currentdate, odir, 'LowResDEM_orig', oformat=oformat,
+        #                       FillVal=FillVal)
+        #
+        # resLowResDEM = resample_grid(lowResDEM, lowResLon, lowResLat, highResLon, highResLat, method=resamplingtype,
+        #                              FillVal=0.0)
 
         lowResDEM[Lmismask] = FillVal
-        elevationCorrection = highResDEM - resLowResDEM
+        elevationCorrection = highResDEM - lowResDEM
+
+        # lons = highResLon
+        # lats = highResLat
+        # save_as_mapsstack_per_day(lats, lons, elevationCorrection, 10, currentdate, odir, 'elev_correction', oformat=oformat,
+        #                       FillVal=FillVal)
+        #
+        # save_as_mapsstack_per_day(lats, lons, lowResDEM, 20, currentdate, odir, 'LowResDEM', oformat=oformat,
+        #                       FillVal=FillVal)
+        # save_as_mapsstack_per_day(lats, lons, highResDEM, 10, currentdate, odir, 'HighResDEM', oformat=oformat,
+        #                       FillVal=FillVal)
 
     # Check whether evaporation should be calculated
     calculateEvap = configget(logger, theconf, "selection", "calculateEvap", calculateEvap)
@@ -208,7 +224,7 @@ def main(argv=None):
 
         if ncnt > 0 and ncnt >= StartStep and ncnt <= EndStep:
             downscale(ncnt, currentdate, filenames, variables, standard_names, serverroot, wrrsetroot, relevantVars,
-                      elevationCorrection, BB, highResLon, highResLat, resLowResDEM, highResDEM, lowResLon, lowResLat,
+                      elevationCorrection, BB, highResLon, highResLat, lowResDEM, highResDEM, lowResLon, lowResLat,
                       lowResDEM, logger, radcordir, odir, oprefix, lonmax, lonmin, latmax, latmin, downscaling,
                       resamplingtype, oformat, saveAllData, FillVal)
 

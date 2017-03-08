@@ -183,12 +183,13 @@ def main(argv=None):
 
         lowResDEM[Lmismask] = FillVal
         elevationCorrection = highResDEM - resLowResDEM
-        # lons = highResLon
-        # lats = highResLat
+        lons = highResLon
+        lats = highResLat
         #print('Elevation Correction', elevationCorrection.shape)
         #print('Lats sdfsdfsd', lats)
         #print('Lats sdfsdfsd', long)
         #save_as_gtiff(lats, lons, elevationCorrection, 0, odir, 'ElevCorrect', prj)
+        save_as_gtiff(lats, lons, resLowResDEM, 0, odir, 'lowResDEM', prj)
 
 
     # Check whether evaporation should be calculated
