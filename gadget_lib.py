@@ -50,7 +50,7 @@ def PenmanMonteith(currentdate, relevantDataFields, rtoa, es_mean, ea_mean, mism
     Pres = relevantDataFields[5]
     # Q       =  relevantDataFields[6]
 
-    Tmean = (relevantDataFields[0] + (relevantDataFields[1]+273.15)) / 2
+    Tmean = (relevantDataFields[0] + (relevantDataFields[1]+273.16)) / 2
     Tmean[mismask] = 0.0001
 
     """
@@ -122,9 +122,9 @@ def PenmanMonteith(currentdate, relevantDataFields, rtoa, es_mean, ea_mean, mism
     ra = 110./Wsp_2                                  # 0.50 m tall crop height = [s m-1]
 
 
-    PETmm = np.maximum(ne.evaluate("(delta * Rnet) + (TimeStepSecs *rho * cp * (vpd / ra))"), 1)
+    PETmm = np.maximum(ne.evaluate("(delta * Rnet) + (rho * cp * (vpd / ra))"), 1)
     PETmm /= np.maximum(ne.evaluate("(delta + gamma*(1 + rs/ra))"), 1)
-    PETmm /= Lheat
+    PETmm *= (TimeStepSecs/Lheat)
 
     # PETag = pcr.numpy2pcr(Scalar, PETmm, 0.0)
     # aguila(PETag)
@@ -148,15 +148,19 @@ def downscale(ncnt, currentdate, filenames, variables, standard_names, serverroo
     relevantDataFields = []
 
     year = str(currentdate.year)
-    yearly_dir = os.path.join(odir, year)
 
-    if not os.path.exists(yearly_dir):
-        os.mkdir(yearly_dir)
+    pm_year = 'PM{}'.format(year)
+    rad_year = 'rad{}'.format(year)
 
-    odir = yearly_dir
+    odirPM = os.path.join(odir, pm_year)
+    if not os.path.exists(odirPM):
+        os.mkdir(odirPM)
+    odirrad = os.path.join(odir, rad_year)
+    if not os.path.exists(odirrad):
+        os.mkdir(odirrad)
 
     # Get all data for this timestep
-    mapname = os.path.join(odir, getmapname(ncnt, oprefix, currentdate))
+    mapname = os.path.join(odirPM, getmapname(ncnt, oprefix, currentdate))
     if os.path.exists(mapname) or os.path.exists(mapname + ".gz") or os.path.exists(mapname + ".zip"):
         logger.info("Skipping map: " + mapname)
     else:
@@ -173,7 +177,9 @@ def downscale(ncnt, currentdate, filenames, variables, standard_names, serverroo
 
                 logger.info("Get data...: " + str(timelist))
                 mstack = ncstepobj.getdates(timelist)
-                mean_as_map = flipud(mstack.mean(axis=0)) #Time dimension is 3(2) instead of 1st in new data
+                mean_as_map = mstack.mean(axis=0) #Time dimension is 3(2) instead of 1st in new data
+
+
 
                 # if variables[i] == 'SurfaceIncidentShortwaveRadiation':
                 #     save_as_mapsstack_per_day(lats, lons, mean_as_map, int(ncnt), currentdate, odir,
@@ -191,7 +197,13 @@ def downscale(ncnt, currentdate, filenames, variables, standard_names, serverroo
                 mean_as_map = resample_grid(mean_as_map, ncstepobj.lon, ncstepobj.lat, highResLon, highResLat,
                                             method=resamplingtype, FillVal=FillVal)
                 mismask = mean_as_map == FillVal
-                mean_as_map = flipud(mean_as_map)
+                mean_as_map = (mean_as_map)
+
+                # if nrcalls == 0:
+                #     save_as_mapsstack_per_day(lowResLat, lowResLon, mean_as_map, int(ncnt), currentdate, odir,
+                #                           prefix='TMIN',
+                #                           oformat=oformat, FillVal=FillVal)
+
                 mean_as_map[mismask] = FillVal
                 if variables[i] == 'MaxTemperature':
                     mean_as_map, Tmax = correctTemp(mean_as_map, elevationCorrection, FillVal)
@@ -199,6 +211,7 @@ def downscale(ncnt, currentdate, filenames, variables, standard_names, serverroo
                     mean_as_map, Tmin = correctTemp(mean_as_map, elevationCorrection, FillVal)
                 if variables[i] == 'SurfaceIncidentShortwaveRadiation':
                     mean_as_map, rtoa = correctRsin(mean_as_map, currentdate, radcordir, LATITUDE, logger, FillVal)
+                    mean_as_map.clip(-999, 500, out=mean_as_map)
                 mean_as_map[mismask] = FillVal
 
                 relevantDataFields.append(mean_as_map)
@@ -245,27 +258,21 @@ def downscale(ncnt, currentdate, filenames, variables, standard_names, serverroo
         logger.info("Applying aridity correction...")
         ea_mean, Tdew_diff = arid_cor(relevantDataFields[1], ea_mean, logger)
         mean_as_map[mismask] = FillVal
-        ea_arid = ea_mean
+        # ea_arid = ea_mean
         # ea_arid.clip(-999, 10000, out=ea_arid)
 
         PETmm, delta, gamma, rho = PenmanMonteith(currentdate, relevantDataFields, rtoa, es_mean, ea_mean, mismask, highResDEM)
         # FIll out unrealistic values
         PETmm[mismask] = FillVal
         PETmm[isinf(PETmm)] = FillVal
-        PETmm.clip(0, 50, out=PETmm)
+        PETmm.clip(-999, 50, out=PETmm)
 
         logger.info("Saving PM PET data for: " + str(currentdate))
-        save_as_mapsstack_per_day(lats, lons, PETmm, int(ncnt), currentdate, odir, prefix=oprefix, oformat=oformat,
+
+        save_as_mapsstack_per_day(lats, lons, PETmm, int(ncnt), currentdate, odirPM, prefix=oprefix, oformat=oformat,
                                   FillVal=FillVal)
-        save_as_mapsstack_per_day(lats, lons, relevantDataFields[3], int(ncnt), currentdate, odir, prefix='RTOT',
+        save_as_mapsstack_per_day(lats, lons, relevantDataFields[3], int(ncnt), currentdate, odirrad, prefix='RTOT',
                                    oformat=oformat, FillVal=FillVal)
-        save_as_mapsstack_per_day(lats, lons, relevantDataFields[1], int(ncnt), currentdate, odir, prefix='TMIN',
-                                  oformat=oformat, FillVal=FillVal)
-        save_as_mapsstack_per_day(lats, lons, relevantDataFields[0], int(ncnt), currentdate, odir, prefix='TMAX',
-                                  oformat=oformat, FillVal=FillVal)
-        save_as_mapsstack_per_day(lats,lons,delta,int(ncnt),currentdate,odir,prefix='delta',oformat=oformat,FillVal=FillVal)
-        save_as_mapsstack_per_day(lats,lons,gamma,int(ncnt),currentdate,odir,prefix='gamma',oformat=oformat,FillVal=FillVal)
-        save_as_mapsstack_per_day(lats,lons,rho, int(ncnt), currentdate, odir, prefix='Rho',oformat=oformat, FillVal=FillVal)
         # save_as_mapsstack_per_day(lats,lons,Rnet,int(ncnt),currentdate,odir,prefix='RNET',oformat=oformat,FillVal=FillVal)
         # save_as_mapsstack_per_day(lats,lons,Rlnet_Watt,int(ncnt),currentdate,odir,prefix='RLIN',oformat=oformat,FillVal=FillVal)
         # save_as_mapsstack_per_day(lats,lons,Ra,int(ncnt),currentdate,odir,prefix='Ra',oformat=oformat,FillVal=FillVal)
@@ -282,6 +289,16 @@ def downscale(ncnt, currentdate, filenames, variables, standard_names, serverroo
                                       oformat=oformat, FillVal=FillVal)
             save_as_mapsstack_per_day(lats, lons, relevantDataFields[2], int(ncnt), currentdate, odir, prefix='Q',
                                       oformat=oformat, FillVal=FillVal)
+            save_as_mapsstack_per_day(lats, lons, relevantDataFields[1], int(ncnt), currentdate, odir, prefix='TMIN',
+                                      oformat=oformat, FillVal=FillVal)
+            save_as_mapsstack_per_day(lats, lons, relevantDataFields[0], int(ncnt), currentdate, odir, prefix='TMAX',
+                                      oformat=oformat, FillVal=FillVal)
+            save_as_mapsstack_per_day(lats, lons, delta, int(ncnt), currentdate, odir, prefix='delta', oformat=oformat,
+                                      FillVal=FillVal)
+            save_as_mapsstack_per_day(lats, lons, gamma, int(ncnt), currentdate, odir, prefix='gamma', oformat=oformat,
+                                      FillVal=FillVal)
+            save_as_mapsstack_per_day(lats, lons, rho, int(ncnt), currentdate, odir, prefix='Rho', oformat=oformat,
+                                      FillVal=FillVal)
             # save_as_mapsstack_per_day(lats,lons,relevantDataFields[6],int(ncnt),currentdate,odir,prefix='Qcorr',oformat=oformat,FillVal=FillVal)
             save_as_mapsstack_per_day(lats,lons,rh_corr,int(ncnt),currentdate,odir,prefix='RHcorr',oformat=oformat,FillVal=FillVal)
             save_as_mapsstack_per_day(lats,lons,rh_org,int(ncnt),currentdate,odir,prefix='RHorg',oformat=oformat,FillVal=FillVal)

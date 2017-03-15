@@ -892,7 +892,7 @@ def resample_grid(gridZ_in,Xin,Yin,Xout,Yout,method='nearest',FillVal=1E31):
 
     #originally flipud(gridZ_in)
     if method in 'nearest linear':
-        interobj = scipy.interpolate.RegularGridInterpolator((Ysrt,Xin), gridZ_in, method=method ,bounds_error=False,fill_value=float32(FillVal))
+        interobj = scipy.interpolate.RegularGridInterpolator((Ysrt,Xin), flipud(gridZ_in), method=method ,bounds_error=False,fill_value=float32(FillVal))
         _x, _y = meshgrid(Xout, Yout)
         yx_outpoints = transpose([_y.flatten(), _x.flatten()])
 

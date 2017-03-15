@@ -182,14 +182,29 @@ def main(argv=None):
                                      FillVal=0.0)
 
         lowResDEM[Lmismask] = FillVal
+
         elevationCorrection = highResDEM - resLowResDEM
-        lons = highResLon
-        lats = highResLat
+
+        currentdate = datetime.datetime(2000, 1, 1)
+        # save_as_mapsstack_per_day(lowResLat, lowResLon, resLowResDEM, 20, currentdate, odir, 'LowResDEM', oformat=oformat,
+        #                        FillVal=FillVal)
+        # save_as_mapsstack_per_day(lowResLat, lowResLon, highResDEM, 20, currentdate, odir, 'highResDEM',
+        #                           oformat=oformat,
+        #                           FillVal=FillVal)
+        # save_as_mapsstack_per_day(lowResLat, lowResLon, elevationCorrection, 20, currentdate, odir, prj, 'elevCorrect',
+        #                           oformat=oformat,
+        #                           FillVal=FillVal)
+        # save_as_mapsstack_per_day(lowResLat, lowResLon, lowResDEM, 20, currentdate, odir, 'LowResDEM', oformat=oformat,
+        #                        FillVal=FillVal)
+
+
+        # lons = highResLon
+        # lats = highResLat
         #print('Elevation Correction', elevationCorrection.shape)
         #print('Lats sdfsdfsd', lats)
         #print('Lats sdfsdfsd', long)
-        #save_as_gtiff(lats, lons, elevationCorrection, 0, odir, 'ElevCorrect', prj)
-        save_as_gtiff(lats, lons, resLowResDEM, 0, odir, 'lowResDEM', prj)
+        # save_as_gtiff(lats, lons, elevationCorrection, 0, odir, 'ElevCorrect', prj)
+        # save_as_gtiff(lats, lons, resLowResDEM, 0, odir, 'lowResDEM', prj)
 
 
     # Check whether evaporation should be calculated
